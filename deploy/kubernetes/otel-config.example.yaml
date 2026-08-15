@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rustprofile-otel
+  namespace: rustprofile-system
+data:
+  OTEL_EXPORTER_OTLP_PROFILES_ENDPOINT: http://otel-collector.observability.svc:4318/v1development/profiles
+  OTEL_EXPORTER_OTLP_PROFILES_PROTOCOL: http/protobuf
+  OTEL_EXPORTER_OTLP_PROFILES_COMPRESSION: gzip
+  OTEL_EXPORTER_OTLP_PROFILES_TIMEOUT: "10000"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rustprofile-otel
+  namespace: rustprofile-system
+type: Opaque
+stringData:
+  OTEL_EXPORTER_OTLP_PROFILES_HEADERS: authorization=Bearer replace-me

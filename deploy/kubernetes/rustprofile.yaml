@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rustprofile-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rustprofile
+  namespace: rustprofile-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: rustprofile-pod-reader
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: rustprofile-pod-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: rustprofile-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: rustprofile
+    namespace: rustprofile-system
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: rustprofile
+  namespace: rustprofile-system
+  labels:
+    app.kubernetes.io/name: rustprofile
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rustprofile
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: rustprofile
+    spec:
+      serviceAccountName: rustprofile
+      hostPID: true
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: rustprofile
+          image: rustprofile:0.1.0
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - trap 'exit 0' TERM INT; while :; do sleep 3600; done
+          securityContext:
+            privileged: true
+            allowPrivilegeEscalation: true
+            seccompProfile:
+              type: Unconfined
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          envFrom:
+            - configMapRef:
+                name: rustprofile-otel
+                optional: true
+            - secretRef:
+                name: rustprofile-otel
+                optional: true
+          volumeMounts:
+            - name: profiles
+              mountPath: /profiles
+            - name: otlp-ca
+              mountPath: /etc/rustprofile/otel
+              readOnly: true
+      volumes:
+        - name: profiles
+          hostPath:
+            path: /var/lib/rustprofile
+            type: DirectoryOrCreate
+        - name: otlp-ca
+          secret:
+            secretName: rustprofile-otel-ca
+            optional: true
