@@ -20,28 +20,20 @@
 <g><title>heap::drain — 1.63 s (16.30%)</title><rect x="870" y="180" width="196" height="17" fill="#e88c46"/><text x="873" y="192.5" font-size="11">heap::drain</text></g>
 <g><title>heap::aggregate — 1.12 s (11.20%)</title><rect x="1066" y="180" width="134" height="17" fill="#f1a856"/><text x="1069" y="192.5" font-size="11">heap::aggregate</text></g>
 
-<g><title>epoll_wait — 1.30 s (13.00%)</title><rect x="0" y="162" width="156" height="17" fill="#f2b45e"/><text x="3" y="174.5" font-size="11">epoll_wait</text></g>
-<g><title>resolve_container — 1.80 s (18.00%)</title><rect x="156" y="162" width="216" height="17" fill="#dd7441"/><text x="159" y="174.5" font-size="11">resolve_container</text></g>
-<g><title>perf_ring_buffer — 1.82 s (18.20%)</title><rect x="372" y="162" width="218" height="17" fill="#d64e34"/><text x="375" y="174.5" font-size="11">perf_ring_buffer</text></g>
-<g><title>framehop::unwind — 1.36 s (13.60%)</title><rect x="590" y="162" width="163" height="17" fill="#e06b39"/><text x="593" y="174.5" font-size="11">framehop::unwind</text></g>
-<g><title>symbolize — 0.82 s (8.20%)</title><rect x="753" y="162" width="117" height="17" fill="#eb9149"/><text x="756" y="174.5" font-size="11">symbolize</text></g>
-<g><title>heap::live_map — 0.96 s (9.60%)</title><rect x="870" y="162" width="115" height="17" fill="#ef9f50"/><text x="873" y="174.5" font-size="11">heap::live_map</text></g>
-<g><title>heap::export — 0.67 s (6.70%)</title><rect x="985" y="162" width="81" height="17" fill="#e57b41"/><text x="988" y="174.5" font-size="11">heap::export</text></g>
-<g><title>diagnostics — 0.79 s (7.90%)</title><rect x="1066" y="162" width="95" height="17" fill="#f0aa56"/><text x="1069" y="174.5" font-size="11">diagnostics</text></g>
-<g><title>atomic_write — 0.33 s (3.30%)</title><rect x="1161" y="162" width="39" height="17" fill="#d85a36"/></g>
-
-<g><title>syscall — 0.87 s (8.70%)</title><rect x="0" y="144" width="104" height="17" fill="#f3b961"/><text x="3" y="156.5" font-size="11">syscall</text></g>
-<g><title>containerd_client — 1.42 s (14.20%)</title><rect x="104" y="144" width="170" height="17" fill="#df7943"/><text x="107" y="156.5" font-size="11">containerd_client</text></g>
-<g><title>procfs_snapshot — 0.92 s (9.20%)</title><rect x="274" y="144" width="98" height="17" fill="#ee9b4d"/><text x="277" y="156.5" font-size="11">procfs_snapshot</text></g>
-<g><title>perf_buffer::consume — 1.20 s (12.00%)</title><rect x="372" y="144" width="144" height="17" fill="#d24b33"/><text x="375" y="156.5" font-size="11">perf_buffer::consume</text></g>
-<g><title>capture_user_stack — 0.93 s (9.30%)</title><rect x="516" y="144" width="112" height="17" fill="#da6038"/><text x="519" y="156.5" font-size="11">capture_user_stack</text></g>
-<g><title>resolve_dwarf — 0.71 s (7.10%)</title><rect x="628" y="144" width="85" height="17" fill="#e98343"/><text x="631" y="156.5" font-size="11">resolve_dwarf</text></g>
-<g><title>module_cache — 0.53 s (5.30%)</title><rect x="713" y="144" width="57" height="17" fill="#eca04f"/><text x="716" y="156.5" font-size="11">module_cache</text></g>
-<g><title>rust_alloc — 0.64 s (6.40%)</title><rect x="870" y="144" width="77" height="17" fill="#eda04f"/><text x="873" y="156.5" font-size="11">rust_alloc</text></g>
-<g><title>free_event — 0.48 s (4.80%)</title><rect x="947" y="144" width="58" height="17" fill="#e47b40"/><text x="950" y="156.5" font-size="11">free_event</text></g>
-<g><title>sample_weight — 0.46 s (4.60%)</title><rect x="1005" y="144" width="56" height="17" fill="#e58b47"/><text x="1008" y="156.5" font-size="11">sample_weight</text></g>
-<g><title>write_json — 0.52 s (5.20%)</title><rect x="1061" y="144" width="62" height="17" fill="#f0a855"/><text x="1064" y="156.5" font-size="11">write_json</text></g>
-<g><title>fsync — 0.28 s (2.80%)</title><rect x="1123" y="144" width="34" height="17" fill="#d95d37"/></g>
-<g><title>rename — 0.22 s (2.20%)</title><rect x="1157" y="144" width="27" height="17" fill="#e2763f"/></g>
-<g><title>directory_sync — 0.16 s (1.60%)</title><rect x="1184" y="144" width="16" height="17" fill="#ec994b"/></g>
+<g><title>epoll_wait — 1.25 s (12.50%)</title><rect x="0" y="162" width="150" height="17" fill="#f2b45e"/><text x="3" y="174.5" font-size="11">epoll_wait</text></g>
+<g><title>pidfd_read — 0.51 s (5.10%)</title><rect x="150" y="162" width="61" height="17" fill="#e08a47"/></g>
+<g><title>resolve_container — 0.97 s (9.70%)</title><rect x="211" y="162" width="116" height="17" fill="#dd7441"/><text x="214" y="174.5" font-size="11">resolve_container</text></g>
+<g><title>procfs_snapshot — 0.37 s (3.70%)</title><rect x="327" y="162" width="45" height="17" fill="#ee9b4d"/></g>
+<g><title>perf_buffer::consume — 1.13 s (11.30%)</title><rect x="372" y="162" width="136" height="17" fill="#d24b33"/><text x="375" y="174.5" font-size="11">perf_buffer::consume</text></g>
+<g><title>capture_user_stack — 0.75 s (7.50%)</title><rect x="508" y="162" width="90" height="17" fill="#da6038"/><text x="511" y="174.5" font-size="11">capture_user_stack</text></g>
+<g><title>perf_ring_buffer — 0.56 s (5.60%)</title><rect x="598" y="162" width="67" height="17" fill="#d64e34"/></g>
+<g><title>framehop::unwind — 0.83 s (8.30%)</title><rect x="665" y="162" width="100" height="17" fill="#e06b39"/><text x="668" y="174.5" font-size="11">framehop::unwind</text></g>
+<g><title>symbolize — 0.52 s (5.20%)</title><rect x="765" y="162" width="63" height="17" fill="#eb9149"/><text x="768" y="174.5" font-size="11">symbolize</text></g>
+<g><title>module_cache — 0.36 s (3.60%)</title><rect x="828" y="162" width="42" height="17" fill="#eca04f"/></g>
+<g><title>rust_alloc — 0.64 s (6.40%)</title><rect x="870" y="162" width="77" height="17" fill="#eda04f"/><text x="873" y="174.5" font-size="11">rust_alloc</text></g>
+<g><title>free_event — 0.48 s (4.80%)</title><rect x="947" y="162" width="58" height="17" fill="#e47b40"/><text x="950" y="174.5" font-size="11">free_event</text></g>
+<g><title>sample_weight — 0.51 s (5.10%)</title><rect x="1005" y="162" width="61" height="17" fill="#e58b47"/></g>
+<g><title>write_json — 0.52 s (5.20%)</title><rect x="1066" y="162" width="62" height="17" fill="#f0a855"/><text x="1069" y="174.5" font-size="11">write_json</text></g>
+<g><title>fsync — 0.30 s (3.00%)</title><rect x="1128" y="162" width="36" height="17" fill="#d95d37"/></g>
+<g><title>directory_sync — 0.30 s (3.00%)</title><rect x="1164" y="162" width="36" height="17" fill="#ec994b"/></g>
 </svg>

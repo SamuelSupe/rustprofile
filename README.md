@@ -12,7 +12,9 @@ pprof profile protobufs, plus a JSON diagnostics file for every time window.
 When configured, the same completed windows are also exported as OTLP Profiles
 over HTTP/protobuf; local files remain the authoritative record.
 
-[简体中文说明](dist/README.zh-CN.md) · [发行记录](CHANGELOG.md) · [GitHub Releases](https://github.com/SamuelSupe/rustprofile/releases)
+**Language / 语言:** **English (default)** · [简体中文](dist/README.zh-CN.md)
+
+[发行记录](CHANGELOG.md) · [GitHub Releases](https://github.com/SamuelSupe/rustprofile/releases)
 
 This README describes the implemented CLI and its limits. Validation claims
 are limited to the explicitly listed evidence; no broader production-kernel,

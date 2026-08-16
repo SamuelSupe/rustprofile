@@ -1,5 +1,7 @@
 # rustprofile 0.1.0
 
+**Language / 语言:** [English (default)](../README.md) · **简体中文**
+
 面向单个已存在 native 进程、Docker 容器或 Kubernetes 应用容器的 Linux
 持续 CPU 与采样堆分析器。本文件随发行包交付。配置 endpoint 后，每个完成的
 窗口还可通过 OTLP/HTTP protobuf 输出 Profiles；本地 pprof 与 diagnostics
