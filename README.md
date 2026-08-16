@@ -285,6 +285,19 @@ written in this invocation, all files belonging to the oldest window (CPU and
 heap when requested, optional SVGs, plus diagnostics) are removed. Files from older
 invocations are not pruned.
 
+### Profiling output example
+
+With `--svg`, rustprofile writes a self-contained flame graph alongside the
+machine-readable pprof and diagnostics files. Frame width represents the share
+of sampled CPU time (or heap in-use bytes for a heap profile); hover a frame in
+an SVG viewer to see its label and percentage.
+
+![Illustrative rustprofile CPU flame graph](docs/profiling-example.svg)
+
+The image is an illustrative 10-second window showing the shape of the actual
+renderer output; production SVGs are generated from the selected target's real
+samples.
+
 ## Docker and Kubernetes deployment
 
 The included [Dockerfile](Dockerfile) builds a Linux release image. A Docker
