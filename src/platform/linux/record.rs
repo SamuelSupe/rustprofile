@@ -29,7 +29,7 @@ use crate::{
         OtlpExportStatus, WindowDiagnostics,
     },
     maps::{ExecutableRanges, MapEntry, read_process_maps},
-    pprof::{write_cpu_profile, write_heap_profile, write_json_atomic},
+    pprof::{sync_directory, write_cpu_profile, write_heap_profile, write_json_atomic},
     process::{self, file_identity},
     profile::{CpuValues, Frame, HeapValues, Stack, has_address_cycle},
     svg::{FlameValue, write_flamegraph},
@@ -176,23 +176,42 @@ pub fn record(
                     }
                     return Err(error);
                 }
-                let refreshed_maps = read_process_maps(args.pid)?;
+                let refreshed_maps = match read_process_maps(args.pid) {
+                    Ok(maps) => maps,
+                    Err(_) if pidfd.exited()? => {
+                        target_exited = true;
+                        break;
+                    }
+                    Err(error) => return Err(error),
+                };
                 if refreshed_maps != maps {
                     let unwind_maps_changed = unwind_maps_changed(&maps, &refreshed_maps);
                     maps = refreshed_maps;
                     executable_ranges = ExecutableRanges::from_maps(&maps);
                     if unwind_maps_changed {
-                        if collectors.dwarf.is_some() {
-                            collectors.dwarf = Some(DwarfUnwinder::for_process(args.pid)?);
-                        }
-                        if let Some(heap) = collectors.heap.as_mut() {
-                            heap.refresh_unwinder(args.pid)?;
-                        }
-                        output_writer.replace_symbolizer(Symbolizer::for_process(
-                            args.pid,
-                            &args.symbols.symbol_dirs,
-                            args.symbols.debuginfod.as_deref(),
-                        )?)?;
+                        let refreshed_symbolizer = (|| {
+                            if collectors.dwarf.is_some() {
+                                collectors.dwarf = Some(DwarfUnwinder::from_maps(args.pid, &maps)?);
+                            }
+                            if let Some(heap) = collectors.heap.as_mut() {
+                                heap.refresh_unwinder(args.pid, &maps)?;
+                            }
+                            Symbolizer::from_maps(
+                                args.pid,
+                                &maps,
+                                &args.symbols.symbol_dirs,
+                                args.symbols.debuginfod.as_deref(),
+                            )
+                        })();
+                        let refreshed_symbolizer = match refreshed_symbolizer {
+                            Ok(symbolizer) => symbolizer,
+                            Err(_) if pidfd.exited()? => {
+                                target_exited = true;
+                                break;
+                            }
+                            Err(error) => return Err(error),
+                        };
+                        output_writer.replace_symbolizer(refreshed_symbolizer)?;
                     }
                 }
             }
@@ -581,14 +600,28 @@ impl WindowOutput {
 }
 
 fn rollback_incomplete_window(outputs: &[PathBuf], error: anyhow::Error) -> anyhow::Error {
-    let failures = outputs
-        .iter()
-        .filter_map(|output| match fs::remove_file(output) {
-            Ok(()) => None,
-            Err(remove_error) if remove_error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(remove_error) => Some(format!("{}: {remove_error}", output.display())),
-        })
-        .collect::<Vec<_>>();
+    let mut directories = HashSet::new();
+    let mut failures = Vec::new();
+    for output in outputs {
+        match fs::remove_file(output) {
+            Ok(()) => {
+                directories.insert(output.parent().unwrap_or_else(|| Path::new(".")).to_owned());
+            }
+            Err(remove_error) if remove_error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(remove_error) => failures.push(format!("{}: {remove_error}", output.display())),
+        }
+    }
+    for directory in directories {
+        match sync_directory(&directory) {
+            Ok(()) => {}
+            Err(sync_error)
+                if matches!(
+                    sync_error.kind(),
+                    std::io::ErrorKind::InvalidInput | std::io::ErrorKind::Unsupported
+                ) => {}
+            Err(sync_error) => failures.push(format!("{}: {sync_error}", directory.display())),
+        }
+    }
     if failures.is_empty() {
         error
     } else {

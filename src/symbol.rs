@@ -82,13 +82,25 @@ impl Symbolizer {
         debuginfod: Option<&str>,
     ) -> Result<Self> {
         let maps = read_process_maps(pid)?;
+        Self::from_maps(pid, &maps, symbol_dirs, debuginfod)
+    }
+
+    pub fn from_maps(
+        pid: i32,
+        maps: &[MapEntry],
+        symbol_dirs: &[PathBuf],
+        debuginfod: Option<&str>,
+    ) -> Result<Self> {
         let mut grouped = BTreeMap::<PathBuf, Vec<MapEntry>>::new();
         for mapping in maps
-            .into_iter()
+            .iter()
             .filter(|mapping| mapping.inode != 0 && mapping.is_executable())
         {
             if let Some(path) = &mapping.path {
-                grouped.entry(path.clone()).or_default().push(mapping);
+                grouped
+                    .entry(path.clone())
+                    .or_default()
+                    .push(mapping.clone());
             }
         }
 

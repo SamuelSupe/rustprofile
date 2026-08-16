@@ -135,6 +135,7 @@ pub struct PerfCollector {
     frequency: u32,
     max_threads: usize,
     events: HashMap<i32, PerfEvent>,
+    retired_events: Vec<PerfEvent>,
     poll_fds: Vec<libc::pollfd>,
     poll_tids: Vec<i32>,
 }
@@ -183,6 +184,7 @@ impl PerfCollector {
             frequency,
             max_threads,
             events: HashMap::new(),
+            retired_events: Vec::new(),
             poll_fds: Vec::new(),
             poll_tids: Vec::new(),
         };
@@ -200,7 +202,18 @@ impl PerfCollector {
             );
         }
         let active = threads.iter().copied().collect::<HashSet<_>>();
-        self.events.retain(|tid, _| active.contains(tid));
+        let retired = self
+            .events
+            .keys()
+            .filter(|tid| !active.contains(tid))
+            .copied()
+            .collect::<Vec<_>>();
+        self.retired_events.reserve(retired.len());
+        for tid in retired {
+            if let Some(event) = self.events.remove(&tid) {
+                self.retired_events.push(event);
+            }
+        }
         for tid in threads {
             if !self.events.contains_key(&tid) {
                 let event = match PerfEvent::open(tid, self.mode, self.frequency) {
@@ -226,6 +239,7 @@ impl PerfCollector {
 
     pub fn drain_into(&mut self, batch: &mut PerfBatch) {
         reset_batch(batch);
+        self.drain_retired_into(batch);
         for event in self.events.values_mut() {
             event.drain(batch);
         }
@@ -237,6 +251,7 @@ impl PerfCollector {
         timeout: std::time::Duration,
     ) -> Result<()> {
         reset_batch(batch);
+        self.drain_retired_into(batch);
         if self.poll_fds.is_empty() {
             return Ok(());
         }
@@ -267,6 +282,12 @@ impl PerfCollector {
             }
         }
         Ok(())
+    }
+
+    fn drain_retired_into(&mut self, batch: &mut PerfBatch) {
+        for mut event in self.retired_events.drain(..) {
+            event.drain(batch);
+        }
     }
 
     fn rebuild_poll_fds(&mut self) {
@@ -694,4 +715,79 @@ fn page_size() -> Result<usize> {
         bail!("failed to determine system page size");
     }
     usize::try_from(size).context("page size does not fit usize")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{ptr, time::Duration};
+
+    use super::*;
+
+    #[test]
+    fn drains_lost_record_from_retired_event_without_active_poll_fds() {
+        let page_size = page_size().unwrap();
+        let backing = tempfile::tempfile().unwrap();
+        backing.set_len((page_size * 2) as u64).unwrap();
+        // SAFETY: `backing` is a valid two-page file, and the requested mapping is within it.
+        let mut ring = unsafe {
+            MmapOptions::new()
+                .len(page_size * 2)
+                .map_mut(&backing)
+                .unwrap()
+        };
+        // The retired event is dropped after draining, so keep a second mapping to verify its
+        // metadata update after `wait_and_drain_into` returns.
+        // SAFETY: `backing` remains a valid two-page file for this read-only mapping.
+        let observer = unsafe { MmapOptions::new().len(page_size * 2).map(&backing).unwrap() };
+        let metadata = ring.as_mut_ptr().cast::<perf::perf_event_mmap_page>();
+        let observer_metadata = observer.as_ptr().cast::<perf::perf_event_mmap_page>();
+        let record_size = 24_u16;
+
+        // SAFETY: `ring` is page-aligned and its first page is large enough for the metadata
+        // structure; the pointer remains valid while the mapping is owned by the event.
+        unsafe {
+            ptr::write(
+                metadata,
+                perf::perf_event_mmap_page {
+                    data_head: u64::from(record_size),
+                    data_offset: page_size as u64,
+                    data_size: page_size as u64,
+                    ..Default::default()
+                },
+            );
+        }
+        let record = &mut ring[page_size..page_size + usize::from(record_size)];
+        record[0..4].copy_from_slice(&(perf::PERF_RECORD_LOST as u32).to_ne_bytes());
+        record[6..8].copy_from_slice(&record_size.to_ne_bytes());
+        record[8..16].copy_from_slice(&17_u64.to_ne_bytes());
+        record[16..24].copy_from_slice(&9_u64.to_ne_bytes());
+
+        let mut collector = PerfCollector {
+            pid: 0,
+            mode: UnwindMode::Fp,
+            frequency: 0,
+            max_threads: 0,
+            events: HashMap::new(),
+            retired_events: vec![PerfEvent {
+                file: tempfile::tempfile().unwrap(),
+                ring,
+                mode: UnwindMode::Fp,
+                register_mask: 0,
+            }],
+            poll_fds: Vec::new(),
+            poll_tids: Vec::new(),
+        };
+        let mut batch = PerfBatch::default();
+
+        collector
+            .wait_and_drain_into(&mut batch, Duration::ZERO)
+            .unwrap();
+
+        assert_eq!(batch.lost_samples, 9);
+        assert!(collector.retired_events.is_empty());
+        // SAFETY: the observer mapping is live, page-aligned, and contains the metadata page.
+        let data_tail =
+            unsafe { ptr::read_volatile(ptr::addr_of!((*observer_metadata).data_tail)) };
+        assert_eq!(data_tail, u64::from(record_size));
+    }
 }

@@ -238,11 +238,10 @@ impl HeapCollector {
         self.state.clear_live();
     }
 
-    pub fn refresh_unwinder(&mut self, pid: i32) -> Result<()> {
-        let maps = read_process_maps(pid)?;
-        self.executable_ranges = ExecutableRanges::from_maps(&maps);
+    pub fn refresh_unwinder(&mut self, pid: i32, maps: &[crate::maps::MapEntry]) -> Result<()> {
+        self.executable_ranges = ExecutableRanges::from_maps(maps);
         if self.dwarf.is_some() {
-            self.dwarf = Some(DwarfUnwinder::for_process(pid)?);
+            self.dwarf = Some(DwarfUnwinder::from_maps(pid, maps)?);
         }
         Ok(())
     }

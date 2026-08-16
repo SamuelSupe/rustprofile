@@ -305,13 +305,14 @@ static __always_inline int finish_allocation(struct pt_regs *ctx, int posix_mema
     }
 
     if (value->sampled && ptr) {
-        if (live_count >= LIVE_SAMPLE_CAPACITY)
-            increment_stat(STAT_MAP_EVICTIONS);
         if (bpf_map_update_elem(&live_samples, &ptr, &value->token, BPF_ANY)) {
             increment_stat(STAT_MAP_UPDATE_FAILURES);
         } else {
-            if (live_count < LIVE_SAMPLE_CAPACITY)
-                __sync_fetch_and_add(&live_count, 1);
+            __u64 previous_live_count = __sync_fetch_and_add(&live_count, 1);
+            if (previous_live_count >= LIVE_SAMPLE_CAPACITY) {
+                __sync_fetch_and_sub(&live_count, 1);
+                increment_stat(STAT_MAP_EVICTIONS);
+            }
             emit_control(EVENT_ALLOC, value->token, ptr, value->size, value->weight);
             increment_stat(STAT_SAMPLED_ALLOCS);
         }
