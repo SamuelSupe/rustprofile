@@ -1,5 +1,7 @@
 # rustprofile
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 ![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-orange?logo=rust)
 ![Linux](https://img.shields.io/badge/platform-Linux%205.8%2B-blue?logo=linux)
 ![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-green)
@@ -11,8 +13,6 @@ per-thread CPU samples and sampled allocator activity into gzip-compressed
 pprof profile protobufs, plus a JSON diagnostics file for every time window.
 When configured, the same completed windows are also exported as OTLP Profiles
 over HTTP/protobuf; local files remain the authoritative record.
-
-[English](README.md) | [简体中文](README.zh-CN.md)
 
 [发行记录](CHANGELOG.md) · [GitHub Releases](https://github.com/SamuelSupe/rustprofile/releases)
 
