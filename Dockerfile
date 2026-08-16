@@ -2,6 +2,7 @@ FROM rust:1.88-bookworm AS builder
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+        ca-certificates \
         clang \
         gcc \
         libelf-dev \
