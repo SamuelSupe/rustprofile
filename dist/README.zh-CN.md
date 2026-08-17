@@ -1,24 +1,32 @@
-# rustprofile 0.1.0
+# rustprofile 0.2.1
 
 [English](README.en.md) | [简体中文](README.zh-CN.md)
 
-面向单个已存在 native 进程、Docker 容器或 Kubernetes 应用容器的 Linux
-持续 CPU 与采样堆分析器。本文件随发行包交付。配置 endpoint 后，每个完成的
-窗口还可通过 OTLP/HTTP protobuf 输出 Profiles；本地 pprof 与 diagnostics
-文件始终是权威结果。
+面向已存在 native 进程、Docker 容器或 Kubernetes 应用容器的 Linux 持续
+CPU、off-CPU 与采样堆分析器。本文件随发行包交付。`launch` 会暂停新命令后
+再挂载采集器，`import` 转换 perf.data/simpleperf，`serve` 提供 Firefox
+Profiler 的符号 API。配置 endpoint 后，每个完成的窗口还可通过 OTLP/HTTP
+protobuf 输出 Profiles；本地 pprof 与 diagnostics 文件始终是权威结果。
 
 ## 支持范围与前置条件
 
-- Linux 5.8 或更新版本。
-- `check` 与 `record` 都必须以 `root` 运行。
+- CPU profiling 支持 Linux 5.4 或更新版本；heap profiling 需要 Linux 5.12
+  或更新版本。Linux 5.4-5.11 应显式使用 `--profiles cpu`。
+- off-CPU 需要 sched-switch eBPF probe；`launch` 的后代跟踪需要 cgroup v2。
+  当 CPU/off-CPU 使用容器 cgroup 时，heap 仍只跟踪 init/root 进程。
+- `check`、`record` 和 `launch` 都必须以 `root` 运行；`import` 与 `serve` 是用户态
+  工作流。
 - 二进制架构必须与目标进程一致：aarch64 进程使用 aarch64 发行包，x86_64
   进程使用 x86_64 发行包。
-- 发行二进制是动态 GNU/Linux PIE，不是静态二进制。运行时需要 glibc 2.38
+- 发行二进制是动态 GNU/Linux PIE，不是静态二进制。运行时需要 glibc 2.31
   或更新版本，以及 `libelf.so.1`、`libz.so.1`、`libzstd.so.1`、
   `libgcc_s.so.1`、匹配的 libc 和动态加载器。发行归档不捆绑这些系统库；
-  Linux 5.8 与 root 只是必要条件，并不充分。安装前可用 `ldd ./rustprofile`
-  检查解析到的运行时依赖，并在主机镜像中补齐任何 `not found` 项。
-- 本发行物只跟踪一个明确目标；不会启动进程，也不会跟踪子进程树或 cgroup。
+  满足对应功能的内核版本与 root 只是必要条件，并不充分。安装前可用
+  `ldd ./rustprofile` 检查解析到的运行时依赖，并在主机镜像中补齐任何
+  `not found` 项。
+- `record --pid` 只跟踪一个 host PID。Docker/Kubernetes 的 CPU 与 off-CPU 会
+  跟踪解析得到的容器 cgroup，heap 仍只跟踪 init 进程；`launch` 才是显式的
+  子进程/后代工作流。
 - Docker 目标需要 host PID 可见性、perf/eBPF 所需权限以及
   `/var/run/docker.sock` 访问。
 - Kubernetes 目标需要使用下文提供的 privileged、`hostPID` DaemonSet。
@@ -28,8 +36,8 @@
 发行归档文件名为：
 
 ```text
-rustprofile-0.1.0-linux-aarch64.tar.gz
-rustprofile-0.1.0-linux-x86_64.tar.gz
+rustprofile-0.2.1-linux-aarch64.tar.gz
+rustprofile-0.2.1-linux-x86_64.tar.gz
 ```
 
 归档随附 `SHA256SUMS`。在包含这些文件的目录中，解压前先校验下载内容：
@@ -43,7 +51,7 @@ sha256sum -c SHA256SUMS
 选择同时匹配主机和目标进程架构的归档：
 
 ```sh
-tar -xzf rustprofile-0.1.0-linux-aarch64.tar.gz
+tar -xzf rustprofile-0.2.1-linux-aarch64.tar.gz
 sudo install -m 0755 rustprofile /usr/local/bin/rustprofile
 ```
 
@@ -71,6 +79,35 @@ sudo rustprofile record \
 ```
 
 `--duration 0` 会持续记录，直到目标退出或记录器收到 SIGINT/SIGTERM。
+Linux 5.4-5.11 需要在 `record` 命令中添加 `--profiles cpu`。
+
+暂停新命令、挂载采集器后再继续运行；cgroup v2 上 CPU/off-CPU 会纳入后代：
+
+```sh
+sudo rustprofile launch --profiles cpu,off-cpu --firefox-profile json \
+  --duration 10m --window 60s --output ./profiles \
+  -- ./my-api --port 8080
+```
+
+导入已有采集并生成 Firefox profile：
+
+```sh
+rustprofile import --input perf.data --format auto --window 60s \
+  --firefox-profile jslb --output ./imported
+```
+
+提供 Firefox profile 以及符号/源码/汇编 API：
+
+```sh
+rustprofile serve --profile ./profiles/firefox-session-000000-123.json.gz \
+  --listen 127.0.0.1:8080
+```
+
+使用内置 gallery 浏览目录中的所有 Firefox window：
+
+```sh
+rustprofile serve --directory ./profiles --listen 127.0.0.1:8080
+```
 
 Docker 目标可以使用容器 ID 或名称：
 
@@ -111,7 +148,8 @@ rustprofile check (--pid PID | --docker-container ID_OR_NAME |
   发起查询。启用后，所有 debuginfod 查询共享 Symbolizer 初始化的 30 秒总
   预算，响应流式写入临时缓存，并限制单文件最大 512 MiB。
 
-`check` 会校验 root、内核、架构、线程数以及 perf/eBPF 访问，并报告映射
+`check` 会校验 root、内核、架构、线程数以及 perf 访问，并探测 lifecycle 和
+off-CPU eBPF 加载；在内核满足 heap 门槛时还探测 heap eBPF 加载，同时报告映射
 模块、build ID、unwind 段、符号和 allocator 选择；它不会启动记录会话。
 
 ### `record`
@@ -119,7 +157,7 @@ rustprofile check (--pid PID | --docker-container ID_OR_NAME |
 - `--pid PID`、`--docker-container ID_OR_NAME` 或 `--k8s-pod
   NAMESPACE/NAME`：三选一指定目标；Kubernetes 目标可附加
   `--container NAME`。
-- `--profiles cpu,heap`：逗号分隔的 profile 类型，默认 `cpu,heap`。
+- `--profiles cpu,heap,off-cpu`：逗号分隔的 profile 类型，默认 `cpu,heap`。
 - `--duration DURATION`：默认 `60s`；使用 humantime 语法，`0` 表示无限制。
 - `--window DURATION`：默认 `60s`；必须大于零。
 - `--unwind auto|fp|dwarf`：默认 `auto`。
@@ -128,10 +166,20 @@ rustprofile check (--pid PID | --docker-container ID_OR_NAME |
 - `--allocator auto|rust|system`：默认 `auto`。
 - `--output DIR`：输出目录，默认 `.`。
 - `--keep-windows N`：本次会话保留的窗口数，默认 `60`。
-- `--max-stacks N`：默认 `65,536`；分别限制每个 CPU/heap 输出窗口中的 distinct
-  stack 数。达到上限后已有 stack 继续累加，新 stack 省略。
-- `--svg`：默认关闭；为每个完成的 CPU 和 heap window 写出自包含的静态 SVG
-  火焰图。
+- `--max-stacks N`：默认 `65,536`；分别限制每个 CPU、off-CPU 和 heap 输出窗口中的
+  distinct stack 数。达到上限后已有 stack 继续累加，新 stack 省略。
+- `--max-pending-events N`：默认 `262,144`；perf/eBPF 时间排序的有界缓冲。
+- `--event-reorder-window DURATION`：默认 `100ms`；允许的事件时间偏差，不能
+  大于 `--window`。
+- `--max-timeline-samples N`：默认 `65,536`；每个 Firefox 输出窗口最多保留的
+  时间戳样本数，也限制 OTLP 时间线。超出部分从启用的时间线输出中省略，并计入
+  diagnostics。
+- `--otlp-timeline`：默认关闭；启用 OTLP 时发送有界、带绝对时间戳的 CPU 时间线，
+  不重复发送聚合 CPU 来源；本地 CPU pprof 仍保留。
+- `--firefox-profile json|jslb`：每个完成窗口额外输出一个 Firefox processed
+  profile。
+- `--svg`：默认关闭；为每个完成的 CPU、off-CPU 和 heap window 写出自包含的
+  静态 SVG 火焰图。
 - `--allow-partial`：profile 能力不可用时允许继续输出支持的子集或仅 CPU
   叶子数据。
 - `--symbol-dir DIR` 与 `--debuginfod URL`：与 `check` 相同的符号选项。
@@ -155,6 +203,10 @@ cpu-<session>-<index>-<start-unix-nanos>.pb.gz
 cpu-<session>-<index>-<start-unix-nanos>.svg       （使用 --svg 时）
 heap-<session>-<index>-<start-unix-nanos>.pb.gz
 heap-<session>-<index>-<start-unix-nanos>.svg       （使用 --svg 时）
+off-cpu-<session>-<index>-<start-unix-nanos>.pb.gz
+off-cpu-<session>-<index>-<start-unix-nanos>.svg       （使用 --svg 时）
+firefox-<session>-<index>-<start-unix-nanos>.json.gz
+firefox-<session>-<index>-<start-unix-nanos>.jslb.gz
 diagnostics-<session>-<index>-<start-unix-nanos>.json
 ```
 
@@ -162,7 +214,7 @@ CPU 和 heap 文件是 gzip 压缩的 pprof profile protobuf。CPU 样本包含
 `samples/count` 与 `cpu/nanoseconds`；heap 样本包含 `alloc_objects/count`、
 `alloc_space/bytes`、`inuse_objects/count`、`inuse_space/bytes`，其中 in-use
 只包含 attach 之后观测到的采样分配。样本包含 `process.pid` 以及可用的
-Docker/Kubernetes 身份 labels。diagnostics JSON 为 schema 版本 2，包含
+Docker/Kubernetes 身份 labels。diagnostics JSON 为 schema 版本 3，包含
 `target`、输出路径、warnings、allocator probe 信息、CPU 丢失/格式错误计数、
 CPU 纳秒总值、`aggregation_dropped_samples`、`aggregation_dropped_nanoseconds`、
 heap 四类导出总值、`since_attach` 以及
@@ -171,19 +223,30 @@ heap 四类导出总值、`since_attach` 以及
 stack 上限时，window warnings 也会标记 aggregation drop。即使新 stack 被
 省略，heap live/free state 仍继续跟踪。启用 OTLP 时，`otlp.status` 还会报告
 `pending`、`exported`、`partial`、`failed` 或 `dropped`，并包含尝试次数、拒绝数量和脱敏错误。
+启用 `--otlp-timeline` 时还会记录 `timeline_enabled`、`timeline_samples`、
+`timeline_dropped_samples` 和 `timeline_timestamp_errors`。
+Firefox 时间线丢弃会记录在 `firefox.dropped_samples` 与
+`event_order.timeline_events_dropped`；import diagnostics 使用
+`timeline_dropped_samples`。
 
-`--max-stacks` 分别作用于每个 CPU 和 heap 输出窗口。达到上限后已有 stack
+`--max-stacks` 分别作用于每个 CPU、off-CPU 和 heap 输出窗口。达到上限后已有 stack
 继续累加，只有新出现的 distinct stack 会从 pprof、OTLP 和可选 SVG 输出中省略。
 
-使用 `--svg` 时，异步 output worker 还会为每个请求的 CPU 或 heap profile
-原子生成自包含的静态火焰图。CPU SVG 的帧宽度按 `cpu/nanoseconds` 分配，heap
+使用 `--svg` 时，异步 output worker 还会为每个请求的 CPU、off-CPU 或 heap profile
+原子生成自包含的静态火焰图。CPU 与 off-CPU SVG 的帧宽度按纳秒分配，heap
 SVG 的帧宽度按 `inuse_space/bytes` 分配。SVG 不含脚本，只是派生可视化；pprof
 与 OTLP 仍是权威的机器可读格式。渲染最多保留 100,000 个帧/节点；超过上限时
 只截断 SVG，并在图内标示截断，不影响 pprof 或 OTLP。SVG 随窗口输出集合一起由
 `--keep-windows` 保留或删除。SVG 渲染会直接流式写入原子临时文件，不会先在内存中
 构造完整 SVG 文本。
 
-output worker 会以原子方式发布每个输出文件。如果 CPU/heap pprof、可选 SVG 或
+输出反压时，output worker 会优先保持采集：如果上一个窗口仍在写出，后续窗口只会
+舍弃派生输出——可选 SVG、Firefox profile，以及已配置的 OTLP 导出；CPU/off-CPU/heap
+pprof 和 diagnostics 仍会写出并保持权威。`output_backpressure` 会记录
+`derived_outputs_shed`、提交时的 pending window 数、跳过的派生文件数以及是否跳过
+OTLP。OTLP 导出队列已满时，`otlp.status` 单独记为 `dropped`；导出失败不会删除本地文件。
+
+output worker 会以原子方式发布每个输出文件。如果 CPU/off-CPU/heap pprof、可选 SVG 或
 diagnostics 任一生成失败，会删除该窗口已经发布的文件。只有 retention 成功后
 才会打印 `wrote`；`--keep-windows` 只删除本次记录会话中过期的文件（包括可选
 SVG），不会清理更早会话的文件。
@@ -194,11 +257,11 @@ SVG），不会清理更早会话的文件。
 PID namespace 和 Docker API socket：
 
 ```sh
-docker build -t rustprofile:0.1.0 .
+docker build -t rustprofile:0.2.1 .
 docker run --rm --privileged --pid=host \
   --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock,readonly \
   --mount type=bind,src="$PWD/profiles",dst=/profiles \
-  rustprofile:0.1.0 record --docker-container my-api \
+  rustprofile:0.2.1 record --docker-container my-api \
   --duration 10m --window 60s --output /profiles
 ```
 
@@ -240,6 +303,38 @@ Docker inspect 与 Kubernetes Pod API 控制面请求的超时均为 5 秒，响
 4 MiB 会被拒绝。该限制只作用于目标身份解析，不限制本地 profile 文件或
 OTLP payload。
 
+## Launch、import、serve 与 scope
+
+`launch` 会在预检和挂载 collector 前对 child 发送 `SIGSTOP`，随后继续运行。
+可用时创建临时 cgroup v2，让 CPU/off-CPU 对账并纳入后代；无法创建时，只有
+`--allow-partial` 允许退回精确 child PID。heap probe 仍只附着 init/root 进程，
+这种组合会在 diagnostics 中标为 `mixed_process_and_cgroup`。
+
+`import --input PATH` 读取普通 `perf.data` 或 simpleperf 中带时间戳的
+IP/callchain 样本。默认 `--format auto`，也可显式使用 `perf-data` 或
+`simpleperf`。导入 pprof 保留原始地址和 PID/TID 标签，不附着 live probe，
+也不做实时 DWARF unwind。`--max-stacks` 限制每个导入窗口的 distinct attributed
+stack，`--max-timeline-samples` 限制 Firefox 时间线；最多保留四个待处理时间窗口，
+线程状态最多跟踪 65,536 个 PID/TID 对。
+
+`serve` 必须在 `--profile PATH` 与 `--directory DIR` 中二选一。`--profile` 提供
+兼容旧客户端的 `GET /profile.json`（JSON 为 `application/json`，JSLB 为
+`application/octet-stream`）；`--directory` 最多扫描 16,384 个目录项中的
+`firefox-*.json.gz`/`firefox-*.jslb.gz`，最多展示 4,096 个 profile，并在 `GET /`
+提供内置 gallery，通过 `GET /api/profiles` 列出 window、`GET /api/profile/{sha256-filename-id}`
+解码选中的 window。两种 source 都提供 `GET /healthz` 和 Firefox Profiler/Samply
+兼容的符号、源码、汇编 JSON POST API。压缩输入上限为 512 MiB，解压后的 profile
+上限为 128 MiB；超过 1 MiB 的 diagnostics 会被忽略。viewer 的 samples/stacks
+上限为 65,536，functions 上限为 262,144，threads 上限为 4,096。POST body 上限为
+8 MiB，响应上限为 32 MiB。CORS 默认关闭；`--cors-origin ORIGIN` 才会允许精确
+origin 并启用 preflight（未配置时 `OPTIONS` 返回 405）。loopback 无需 token，非 loopback
+必须设置 `--bearer-token`。
+
+运行中的 `record --pid` 不会隐式跟踪 child。容器目标的 CPU/off-CPU 使用解析
+到的 cgroup，heap 仍限于 init 进程；`--max-pending-events` 和
+`--event-reorder-window` 有界控制 CPU perf 时间排序，off-CPU 使用独立的有界
+区间队列。丢弃和 forced flush 会记录在 diagnostics 中。
+
 ## OTLP Profiles 输出
 
 Exporter 固定使用 `opentelemetry-proto v1.11.0`，通过 OTLP/HTTP
@@ -279,9 +374,15 @@ TLS 或证书等确定性配置错误立即失败。HTTP 408、429、502、503�
 五次并退避，整数秒格式的 `Retry-After` 会被遵守但最多等待 30 秒。OTLP 响应体上限为 1 MiB。每个窗口
 的 gzip 请求体只准备一次，重试时复用同一请求体。队列最多容纳四个窗口；导出
 失败不会删除本地文件，diagnostics 会记录 `pending`、`exported`、`partial`、
-`failed` 或 `dropped`。关闭时停止重试，尚未 flush 的排队窗口标记为 `failed`，
-以保证退出有界。
+`failed` 或 `dropped`。正常关闭会按已配置的重试策略排空队列；异常 teardown
+会取消重试，并把剩余排队窗口标记为 `failed`。
 没有持久化的 OTLP 磁盘 spool，也不会自动稍后重放；请保留本地文件用于恢复。
+
+`--otlp-timeline` 只发送一份 `cpu/nanoseconds` 时间线 Profile，且不再重复发送
+聚合 CPU 来源。每个样本的 `values` 与 `timestamps_unix_nano` 一一对应，
+pprof labels 会解码为 `process.pid`、`thread.id`、`thread.name` 等 attributes。perf
+时间戳会转换为窗口内的 Unix 纳秒；无法转换的样本会省略并计入
+`timeline_timestamp_errors`。该功能不要求生成 Firefox 文件。
 
 ## FP、DWARF 与 partial profile
 
@@ -321,9 +422,13 @@ TLS 或证书等确定性配置错误立即失败。HTTP 408、429、502、503�
 - 目标执行新镜像时，当前窗口以 warning 结束；随后为新镜像刷新预检、unwind
   模式、符号和 collectors。`auto` 校准期间发生 `exec` 同样会重新预检并重启
   校准。
+- Linux 5.8 或更新版本会优先使用 lifecycle eBPF 事件。Linux 5.4-5.7，或
+  lifecycle eBPF 无法挂载的更新内核，会回退到每秒一次的 procfs 对账并在
+  diagnostics 中记录 warning。
 
 ## 验证状态
 
 已在 arm64 OrbStack Linux、以 `root` 运行时验证 runtime，包括 CPU FP、DWARF
 回退、stripped/no-CFI 场景、system heap 和 pprof 解码。x86_64 目前只有发行构建
 与 CLI smoke 证据；没有宣称已完成 native x86_64 perf/eBPF runtime 验证。
+Linux 5.4 compatibility path 尚缺独立的原生 5.4 内核运行时验证。

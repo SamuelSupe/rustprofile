@@ -117,6 +117,13 @@ diagnostics-<session>-<index>-<start-unix-nanos>.json
 
 ![rustprofile CPU flame graph](docs/profiling-example.svg)
 
+profile viewer 的页面布局另有一张静态 UI 预览：
+
+![rustprofile profile viewer 界面预览](docs/profile-ui-preview.svg)
+
+*这是 rustprofile profile viewer 的静态 UI 预览，不是一次真实采集生成的
+profile 输出；实际会话会根据选中的 profile 数据填充同样的布局。*
+
 ## 部署与限制
 
 Docker profiler 需要 host PID namespace、Docker socket、`--privileged` 以及

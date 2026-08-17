@@ -1,0 +1,248 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 900" width="1440" height="900" role="img" aria-labelledby="svg-title svg-description">
+  <title id="svg-title">rustprofile profile viewer UI preview</title>
+  <desc id="svg-description">Static preview of the rustprofile profile viewer: session, window, and thread controls; profile metrics; a sample timeline; a CPU flame graph; a Hot functions table; and a Ready status bar. This illustration is not a captured profile output.</desc>
+  <style>
+    text { font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #172033; }
+    .muted { fill: #64748b; }
+    .caps { fill: #64748b; font-size: 11px; letter-spacing: 1px; }
+    .small { font-size: 11px; }
+    .label { font-size: 12px; }
+    .value { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .control { fill: #fff; stroke: #dbe2ea; }
+    .hairline { stroke: #dbe2ea; stroke-width: 1; }
+    .table-line { stroke: #eef2f6; stroke-width: 1; }
+    .frame { stroke: #fff; stroke-width: .8; }
+    .frame-label { fill: #fff; font-size: 11px; }
+    .mono { font-variant-numeric: tabular-nums; }
+  </style>
+
+  <rect width="1440" height="900" fill="#fff"/>
+
+  <!-- Top toolbar: .top, .field, .search, and Refresh from flamegraph.html. -->
+  <g id="top-toolbar">
+    <line class="hairline" x1="0" y1="57.5" x2="1440" y2="57.5"/>
+    <rect x="18" y="24" width="10" height="10" rx="2" fill="#1769e0"/>
+    <text x="36" y="36" font-size="15" font-weight="750">rustprofile</text>
+
+    <text class="caps" x="143" y="34">SESSION</text>
+    <rect class="control" x="196" y="12" width="176" height="34" rx="6"/>
+    <text class="label" x="207" y="33">record-2026-08-14</text>
+    <path d="M348 27l5 5 5-5" fill="none" stroke="#64748b" stroke-width="1.5"/>
+
+    <text class="caps" x="382" y="34">WINDOW</text>
+    <rect class="control" x="437" y="12" width="190" height="34" rx="6"/>
+    <text class="label" x="448" y="33">#000042 · 14:32:10</text>
+    <path d="M603 27l5 5 5-5" fill="none" stroke="#64748b" stroke-width="1.5"/>
+
+    <text class="caps" x="637" y="34">THREAD</text>
+    <rect class="control" x="690" y="12" width="152" height="34" rx="6"/>
+    <text class="label" x="701" y="33">All threads</text>
+    <path d="M817 27l5 5 5-5" fill="none" stroke="#64748b" stroke-width="1.5"/>
+
+    <rect class="control" x="1018" y="12" width="270" height="34" rx="6"/>
+    <circle cx="1035" cy="28" r="6" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <path d="M1039.5 32.5l4.5 4.5" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <text class="label muted" x="1050" y="33">Search frames…</text>
+    <rect class="control" x="1298" y="12" width="86" height="34" rx="6"/>
+    <path d="M1313 26a7 7 0 1 1-1 6" fill="none" stroke="#1769e0" stroke-width="1.6"/>
+    <path d="M1311 24v5h5" fill="none" stroke="#1769e0" stroke-width="1.6"/>
+    <text class="label" x="1324" y="33">Refresh</text>
+  </g>
+
+  <g id="content">
+    <!-- Summary metrics: .summary, .metric, and .pill. -->
+    <g id="summary">
+      <text class="caps" x="18" y="91">DURATION</text>
+      <text class="value mono" x="18" y="114">10.00 s</text>
+      <line class="hairline" x1="156" y1="76" x2="156" y2="124"/>
+      <text class="caps" x="181" y="91">SAMPLES</text>
+      <text class="value mono" x="181" y="114">12,486</text>
+      <line class="hairline" x1="333" y1="76" x2="333" y2="124"/>
+      <text class="caps" x="358" y="91">DROPPED</text>
+      <text class="value mono" x="358" y="114">34</text>
+      <line class="hairline" x1="492" y1="76" x2="492" y2="124"/>
+      <text class="caps" x="517" y="91">CPU TIME</text>
+      <text class="value mono" x="517" y="114">8.70 s</text>
+      <rect x="1322" y="87" width="100" height="26" rx="13" fill="#eaf2ff"/>
+      <text x="1342" y="104" font-size="12" font-weight="650" fill="#1456b8">JSON</text>
+      <line class="hairline" x1="18" y1="124" x2="1422" y2="124"/>
+    </g>
+
+    <!-- Sample timeline: .timeline, .overview, and the two range inputs. -->
+    <g id="sample-timeline">
+      <text class="caps" x="18" y="157">SAMPLE TIMELINE</text>
+      <text class="small muted mono" x="1316" y="157">4.2 – 13.5 s</text>
+      <rect x="18" y="168" width="1404" height="76" fill="#f4f7fb" stroke="#dbe2ea"/>
+      <g fill="#6ba8f7">
+        <rect x="25" y="215" width="18" height="22"/><rect x="44" y="209" width="18" height="28"/>
+        <rect x="63" y="218" width="18" height="19"/><rect x="82" y="199" width="18" height="38"/>
+        <rect x="101" y="205" width="18" height="32"/><rect x="120" y="188" width="18" height="49"/>
+        <rect x="139" y="214" width="18" height="23"/><rect x="158" y="191" width="18" height="46"/>
+        <rect x="177" y="204" width="18" height="33"/><rect x="196" y="180" width="18" height="57"/>
+        <rect x="215" y="194" width="18" height="43"/><rect x="234" y="211" width="18" height="26"/>
+        <rect x="253" y="202" width="18" height="35"/><rect x="272" y="186" width="18" height="51"/>
+        <rect x="291" y="210" width="18" height="27"/><rect x="310" y="196" width="18" height="41"/>
+        <rect x="329" y="217" width="18" height="20"/><rect x="348" y="190" width="18" height="47"/>
+        <rect x="367" y="206" width="18" height="31"/><rect x="386" y="181" width="18" height="56"/>
+        <rect x="405" y="200" width="18" height="37"/><rect x="424" y="211" width="18" height="26"/>
+        <rect x="443" y="193" width="18" height="44"/><rect x="462" y="213" width="18" height="24"/>
+        <rect x="481" y="185" width="18" height="52"/><rect x="500" y="205" width="18" height="32"/>
+        <rect x="519" y="197" width="18" height="40"/><rect x="538" y="217" width="18" height="20"/>
+        <rect x="557" y="192" width="18" height="45"/><rect x="576" y="202" width="18" height="35"/>
+        <rect x="595" y="211" width="18" height="26"/><rect x="614" y="183" width="18" height="54"/>
+        <rect x="633" y="200" width="18" height="37"/><rect x="652" y="189" width="18" height="48"/>
+        <rect x="671" y="215" width="18" height="22"/><rect x="690" y="197" width="18" height="40"/>
+        <rect x="709" y="204" width="18" height="33"/><rect x="728" y="186" width="18" height="51"/>
+        <rect x="747" y="212" width="18" height="25"/><rect x="766" y="201" width="18" height="36"/>
+        <rect x="785" y="191" width="18" height="46"/><rect x="804" y="208" width="18" height="29"/>
+        <rect x="823" y="180" width="18" height="57"/><rect x="842" y="198" width="18" height="39"/>
+        <rect x="861" y="213" width="18" height="24"/><rect x="880" y="193" width="18" height="44"/>
+        <rect x="899" y="202" width="18" height="35"/><rect x="918" y="188" width="18" height="49"/>
+        <rect x="937" y="215" width="18" height="22"/><rect x="956" y="196" width="18" height="41"/>
+        <rect x="975" y="207" width="18" height="30"/><rect x="994" y="183" width="18" height="54"/>
+        <rect x="1013" y="201" width="18" height="36"/><rect x="1032" y="212" width="18" height="25"/>
+        <rect x="1051" y="191" width="18" height="46"/><rect x="1070" y="204" width="18" height="33"/>
+        <rect x="1089" y="186" width="18" height="51"/><rect x="1108" y="210" width="18" height="27"/>
+        <rect x="1127" y="198" width="18" height="39"/><rect x="1146" y="181" width="18" height="56"/>
+        <rect x="1165" y="205" width="18" height="32"/><rect x="1184" y="213" width="18" height="24"/>
+        <rect x="1203" y="193" width="18" height="44"/><rect x="1222" y="200" width="18" height="37"/>
+        <rect x="1241" y="184" width="18" height="53"/><rect x="1260" y="211" width="18" height="26"/>
+        <rect x="1279" y="196" width="18" height="41"/><rect x="1298" y="207" width="18" height="30"/>
+        <rect x="1317" y="190" width="18" height="47"/><rect x="1336" y="213" width="18" height="24"/>
+        <rect x="1355" y="201" width="18" height="36"/><rect x="1374" y="187" width="18" height="50"/>
+        <rect x="1393" y="211" width="18" height="26"/>
+      </g>
+      <rect x="18" y="168" width="206" height="76" fill="#fff" opacity=".72"/>
+      <rect x="1258" y="168" width="164" height="76" fill="#fff" opacity=".72"/>
+      <line x1="224" y1="168" x2="224" y2="244" stroke="#1769e0" stroke-width="2"/>
+      <line x1="1258" y1="168" x2="1258" y2="244" stroke="#1769e0" stroke-width="2"/>
+      <text class="small muted" x="18" y="263">Start</text>
+      <line x1="57" y1="259" x2="695" y2="259" stroke="#dbe2ea" stroke-width="4" stroke-linecap="round"/>
+      <line x1="224" y1="259" x2="695" y2="259" stroke="#1769e0" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="224" cy="259" r="6" fill="#1769e0"/>
+      <text class="small muted mono" x="705" y="263">4.2 s</text>
+      <text class="small muted" x="756" y="263">End</text>
+      <line x1="793" y1="259" x2="1378" y2="259" stroke="#dbe2ea" stroke-width="4" stroke-linecap="round"/>
+      <line x1="793" y1="259" x2="1258" y2="259" stroke="#1769e0" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="1258" cy="259" r="6" fill="#1769e0"/>
+      <text class="small muted mono" x="1387" y="263" text-anchor="end">13.5 s</text>
+      <line class="hairline" x1="18" y1="283" x2="1422" y2="283"/>
+    </g>
+
+    <!-- Main workspace: .flame-pane on the left and .hotspots on the right. -->
+    <g id="workspace">
+      <text class="caps" x="18" y="318">CPU FLAME GRAPH</text>
+      <text class="small muted mono" x="171" y="318">12,486 samples</text>
+      <rect class="control" x="984" y="300" width="98" height="28" rx="6"/>
+      <path d="M1001 314h15m-7-6v12" stroke="#64748b" stroke-width="1.4"/>
+      <text class="small" x="1020" y="318">Reset zoom</text>
+      <line x1="1090" y1="299" x2="1090" y2="831" class="hairline"/>
+
+      <rect x="18" y="331" width="1052" height="500" fill="#fbfdff" stroke="#dbe2ea"/>
+      <g id="flame-graph">
+        <g>
+          <title>rustprofile::serve — 100 percent of selected CPU time</title>
+          <rect class="frame" x="20" y="348" width="1048" height="23" fill="#1769e0"/>
+          <text class="frame-label" x="25" y="364">rustprofile::serve</text>
+        </g>
+        <g>
+          <title>serve_directory — 31 percent of selected CPU time</title>
+          <rect class="frame" x="20" y="372" width="326" height="23" fill="#2e82f2"/>
+          <text class="frame-label" x="25" y="388">serve_directory</text>
+        </g>
+        <g>
+          <title>decode_profile — 41 percent of selected CPU time</title>
+          <rect class="frame" x="346" y="372" width="426" height="23" fill="#2e82f2"/>
+          <text class="frame-label" x="351" y="388">decode_profile</text>
+        </g>
+        <g>
+          <title>render_view — 28 percent of selected CPU time</title>
+          <rect class="frame" x="772" y="372" width="296" height="23" fill="#2e82f2"/>
+          <text class="frame-label" x="777" y="388">render_view</text>
+        </g>
+
+        <g><rect class="frame" x="20" y="396" width="136" height="23" fill="#4c94f4"/><text class="frame-label" x="25" y="412">scan_windows</text></g>
+        <g><rect class="frame" x="156" y="396" width="190" height="23" fill="#4c94f4"/><text class="frame-label" x="161" y="412">read_manifest</text></g>
+        <g><rect class="frame" x="346" y="396" width="202" height="23" fill="#4c94f4"/><text class="frame-label" x="351" y="412">parse_samples</text></g>
+        <g><rect class="frame" x="548" y="396" width="224" height="23" fill="#4c94f4"/><text class="frame-label" x="553" y="412">build_tree</text></g>
+        <g><rect class="frame" x="772" y="396" width="156" height="23" fill="#4c94f4"/><text class="frame-label" x="777" y="412">draw_timeline</text></g>
+        <g><rect class="frame" x="928" y="396" width="140" height="23" fill="#4c94f4"/><text class="frame-label" x="933" y="412">draw_flame</text></g>
+
+        <g><rect class="frame" x="20" y="420" width="65" height="23" fill="#6ba8f7"/><text class="frame-label" x="25" y="436">read_dir</text></g>
+        <g><rect class="frame" x="85" y="420" width="71" height="23" fill="#6ba8f7"/><text class="frame-label" x="90" y="436">filter</text></g>
+        <g><rect class="frame" x="156" y="420" width="100" height="23" fill="#6ba8f7"/><text class="frame-label" x="161" y="436">sort_windows</text></g>
+        <g><rect class="frame" x="256" y="420" width="90" height="23" fill="#6ba8f7"/><text class="frame-label" x="261" y="436">cache</text></g>
+        <g><rect class="frame" x="346" y="420" width="110" height="23" fill="#6ba8f7"/><text class="frame-label" x="351" y="436">decode_json</text></g>
+        <g><rect class="frame" x="456" y="420" width="92" height="23" fill="#f59e0b"/><text class="frame-label" x="461" y="436">validate</text></g>
+        <g><rect class="frame" x="548" y="420" width="96" height="23" fill="#6ba8f7"/><text class="frame-label" x="553" y="436">aggregate</text></g>
+        <g><rect class="frame" x="644" y="420" width="128" height="23" fill="#6ba8f7"/><text class="frame-label" x="649" y="436">stack_key</text></g>
+        <g><rect class="frame" x="772" y="420" width="75" height="23" fill="#6ba8f7"/><text class="frame-label" x="777" y="436">bin</text></g>
+        <g><rect class="frame" x="847" y="420" width="81" height="23" fill="#6ba8f7"/><text class="frame-label" x="852" y="436">range</text></g>
+        <g><rect class="frame" x="928" y="420" width="76" height="23" fill="#6ba8f7"/><text class="frame-label" x="933" y="436">layout</text></g>
+        <g><rect class="frame" x="1004" y="420" width="64" height="23" fill="#6ba8f7"/><text class="frame-label" x="1009" y="436">label</text></g>
+
+        <g fill="#1769e0">
+          <rect class="frame" x="20" y="444" width="35" height="23"/><rect class="frame" x="55" y="444" width="30" height="23"/>
+          <rect class="frame" x="85" y="444" width="38" height="23"/><rect class="frame" x="123" y="444" width="33" height="23"/>
+          <rect class="frame" x="156" y="444" width="47" height="23"/><rect class="frame" x="203" y="444" width="53" height="23"/>
+          <rect class="frame" x="256" y="444" width="44" height="23"/><rect class="frame" x="300" y="444" width="46" height="23"/>
+          <rect class="frame" x="346" y="444" width="58" height="23"/><rect class="frame" x="404" y="444" width="52" height="23"/>
+          <rect class="frame" x="456" y="444" width="41" height="23"/><rect class="frame" x="497" y="444" width="51" height="23"/>
+          <rect class="frame" x="548" y="444" width="48" height="23"/><rect class="frame" x="596" y="444" width="48" height="23"/>
+          <rect class="frame" x="644" y="444" width="72" height="23"/><rect class="frame" x="716" y="444" width="56" height="23"/>
+          <rect class="frame" x="772" y="444" width="41" height="23"/><rect class="frame" x="813" y="444" width="34" height="23"/>
+          <rect class="frame" x="847" y="444" width="45" height="23"/><rect class="frame" x="892" y="444" width="36" height="23"/>
+          <rect class="frame" x="928" y="444" width="37" height="23"/><rect class="frame" x="965" y="444" width="39" height="23"/>
+          <rect class="frame" x="1004" y="444" width="32" height="23"/><rect class="frame" x="1036" y="444" width="32" height="23"/>
+        </g>
+        <g fill="#2e82f2">
+          <rect class="frame" x="20" y="468" width="25" height="23"/><rect class="frame" x="45" y="468" width="36" height="23"/><rect class="frame" x="81" y="468" width="42" height="23"/>
+          <rect class="frame" x="156" y="468" width="36" height="23"/><rect class="frame" x="192" y="468" width="28" height="23"/><rect class="frame" x="220" y="468" width="36" height="23"/>
+          <rect class="frame" x="346" y="468" width="46" height="23"/><rect class="frame" x="392" y="468" width="31" height="23"/><rect class="frame" x="423" y="468" width="33" height="23"/>
+          <rect class="frame" x="548" y="468" width="34" height="23"/><rect class="frame" x="582" y="468" width="28" height="23"/><rect class="frame" x="610" y="468" width="34" height="23"/>
+          <rect class="frame" x="772" y="468" width="27" height="23"/><rect class="frame" x="799" y="468" width="48" height="23"/>
+          <rect class="frame" x="928" y="468" width="29" height="23"/><rect class="frame" x="957" y="468" width="31" height="23"/><rect class="frame" x="988" y="468" width="16" height="23"/>
+        </g>
+        <g fill="#4c94f4">
+          <rect class="frame" x="20" y="492" width="19" height="23"/><rect class="frame" x="39" y="492" width="27" height="23"/><rect class="frame" x="66" y="492" width="36" height="23"/><rect class="frame" x="102" y="492" width="21" height="23"/>
+          <rect class="frame" x="156" y="492" width="22" height="23"/><rect class="frame" x="178" y="492" width="34" height="23"/><rect class="frame" x="212" y="492" width="44" height="23"/>
+          <rect class="frame" x="346" y="492" width="25" height="23"/><rect class="frame" x="371" y="492" width="32" height="23"/><rect class="frame" x="403" y="492" width="53" height="23"/>
+          <rect class="frame" x="548" y="492" width="32" height="23"/><rect class="frame" x="580" y="492" width="36" height="23"/><rect class="frame" x="616" y="492" width="28" height="23"/>
+          <rect class="frame" x="772" y="492" width="31" height="23"/><rect class="frame" x="803" y="492" width="44" height="23"/>
+          <rect class="frame" x="928" y="492" width="24" height="23"/><rect class="frame" x="952" y="492" width="36" height="23"/><rect class="frame" x="988" y="492" width="16" height="23"/>
+        </g>
+        <text class="small muted" x="20" y="550">Click a frame to zoom · matched frames use the orange search highlight</text>
+      </g>
+
+      <g id="hot-functions">
+        <text class="caps" x="1106" y="318">HOT FUNCTIONS</text>
+        <text class="small muted" x="1331" y="318">SELECTED RANGE</text>
+        <line class="hairline" x1="1106" y1="347" x2="1422" y2="347"/>
+        <text class="caps" x="1106" y="340" font-size="10">FUNCTION</text>
+        <text class="caps" x="1348" y="340" text-anchor="end" font-size="10">TOTAL</text>
+        <text class="caps" x="1417" y="340" text-anchor="end" font-size="10">SELF</text>
+
+        <text class="label" x="1106" y="369">rustprofile::serve</text><text class="label mono" x="1348" y="369" text-anchor="end">4,212</text><text class="label mono" x="1417" y="369" text-anchor="end">2,030</text><line class="table-line" x1="1106" y1="382" x2="1422" y2="382"/>
+        <text class="label" x="1106" y="401">decode_profile</text><text class="label mono" x="1348" y="401" text-anchor="end">3,408</text><text class="label mono" x="1417" y="401" text-anchor="end">1,120</text><line class="table-line" x1="1106" y1="414" x2="1422" y2="414"/>
+        <text class="label" x="1106" y="433">draw_flame</text><text class="label mono" x="1348" y="433" text-anchor="end">2,906</text><text class="label mono" x="1417" y="433" text-anchor="end">1,548</text><line class="table-line" x1="1106" y1="446" x2="1422" y2="446"/>
+        <text class="label" x="1106" y="465">build_tree</text><text class="label mono" x="1348" y="465" text-anchor="end">2,622</text><text class="label mono" x="1417" y="465" text-anchor="end">1,006</text><line class="table-line" x1="1106" y1="478" x2="1422" y2="478"/>
+        <text class="label" x="1106" y="497">parse_samples</text><text class="label mono" x="1348" y="497" text-anchor="end">2,188</text><text class="label mono" x="1417" y="497" text-anchor="end">844</text><line class="table-line" x1="1106" y1="510" x2="1422" y2="510"/>
+        <text class="label" x="1106" y="529">serde_json::from_slice</text><text class="label mono" x="1348" y="529" text-anchor="end">1,944</text><text class="label mono" x="1417" y="529" text-anchor="end">804</text><line class="table-line" x1="1106" y1="542" x2="1422" y2="542"/>
+        <text class="label" x="1106" y="561">draw_timeline</text><text class="label mono" x="1348" y="561" text-anchor="end">1,512</text><text class="label mono" x="1417" y="561" text-anchor="end">742</text><line class="table-line" x1="1106" y1="574" x2="1422" y2="574"/>
+        <text class="label" x="1106" y="593">scan_windows</text><text class="label mono" x="1348" y="593" text-anchor="end">1,144</text><text class="label mono" x="1417" y="593" text-anchor="end">1,144</text><line class="table-line" x1="1106" y1="606" x2="1422" y2="606"/>
+        <text class="label" x="1106" y="625">sort_by_total</text><text class="label mono" x="1348" y="625" text-anchor="end">906</text><text class="label mono" x="1417" y="625" text-anchor="end">416</text><line class="table-line" x1="1106" y1="638" x2="1422" y2="638"/>
+        <text class="label" x="1106" y="657">format_samples</text><text class="label mono" x="1348" y="657" text-anchor="end">720</text><text class="label mono" x="1417" y="657" text-anchor="end">384</text><line class="table-line" x1="1106" y1="670" x2="1422" y2="670"/>
+        <text class="label" x="1106" y="689">read_manifest</text><text class="label mono" x="1348" y="689" text-anchor="end">512</text><text class="label mono" x="1417" y="689" text-anchor="end">215</text><line class="table-line" x1="1106" y1="702" x2="1422" y2="702"/>
+        <text class="label" x="1106" y="721">render_frame</text><text class="label mono" x="1348" y="721" text-anchor="end">408</text><text class="label mono" x="1417" y="721" text-anchor="end">188</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- Footer: .status with the viewer's Ready state. -->
+  <g id="status-bar">
+    <line class="hairline" x1="0" y1="870" x2="1440" y2="870"/>
+    <text x="18" y="889" font-size="11" font-weight="700" fill="#138a52">● Ready</text>
+    <text class="small muted" x="78" y="889">Profile loaded · selected range 4.2 – 13.5 s</text>
+    <text class="small muted mono" x="1422" y="889" text-anchor="end">firefox-record-000042.json.gz</text>
+  </g>
+</svg>

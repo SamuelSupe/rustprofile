@@ -411,6 +411,14 @@ The image is an illustrative 10-second window showing the shape of the actual
 renderer output; production SVGs are generated from the selected target's real
 samples.
 
+The browser-based profile viewer has a separate static UI preview:
+
+![rustprofile profile viewer UI preview](docs/profile-ui-preview.svg)
+
+*This is a static UI preview of the rustprofile profile viewer—not a captured
+profile output; real sessions populate the same layout from selected profile
+data.*
+
 ## Docker and Kubernetes deployment
 
 The included [Dockerfile](Dockerfile) builds a Linux release image. A Docker

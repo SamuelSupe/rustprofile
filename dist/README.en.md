@@ -1,26 +1,34 @@
-# rustprofile 0.1.0
+# rustprofile 0.2.1
 
-Linux continuous CPU and sampled-heap profiling for one existing native
-process, Docker container, or Kubernetes application container. This document
-is intended to ship with the release archives. Completed windows can also be
-sent as OTLP Profiles over HTTP/protobuf when an endpoint is configured; local
-pprof and diagnostics files remain authoritative.
+Linux continuous CPU, off-CPU, and sampled-heap profiling for an existing
+native process, Docker container, or Kubernetes application container. This
+document is intended to ship with the release archives. `launch` starts a
+command suspended before attaching collectors, `import` converts perf.data or
+simpleperf captures, and `serve` exposes Firefox profile symbol APIs.
+Completed windows can also be sent as OTLP Profiles over HTTP/protobuf when an
+endpoint is configured; local pprof and diagnostics files remain authoritative.
 
 ## Support and prerequisites
 
-- Linux 5.8 or newer.
-- Run both `check` and `record` as `root`.
+- Linux 5.4 or newer for CPU profiling. Heap profiling requires Linux 5.12 or
+  newer. On Linux 5.4-5.11, explicitly request `--profiles cpu`.
+- Off-CPU profiling requires the sched-switch eBPF probe; `launch` descendant
+  tracking requires cgroup v2. Heap remains scoped to the container/init
+  process when CPU/off-CPU use a container cgroup.
+- Run `check`, `record`, and `launch` as `root`; `import` and `serve` are
+  user-space workflows.
 - The binary architecture must match the target process: use the aarch64
   archive for an aarch64 process and the x86_64 archive for an x86_64 process.
 - The release binary is a dynamic GNU/Linux PIE, not a static binary. It
-  requires glibc 2.38 or newer and the runtime shared libraries `libelf.so.1`,
+  requires glibc 2.31 or newer and the runtime shared libraries `libelf.so.1`,
   `libz.so.1`, `libzstd.so.1`, `libgcc_s.so.1`, the matching libc, and the
-  dynamic loader. The archives do not bundle these system libraries; Linux
-  5.8 and root are necessary but not sufficient. Check the resolved runtime
-  dependencies before installation with `ldd ./rustprofile` and resolve any
-  `not found` entries in the host image.
-- This release follows one existing PID. It does not launch a process or
-- follow a child tree/cgroup.
+  dynamic loader. The archives do not bundle these system libraries; the
+  relevant kernel baseline and root are necessary but not sufficient. Check
+  the resolved runtime dependencies before installation with
+  `ldd ./rustprofile` and resolve any `not found` entries in the host image.
+- `record --pid` follows one host PID. Docker/Kubernetes CPU and off-CPU
+  collection follows the resolved container cgroup; heap remains init-process
+  scoped. `launch` is the explicit child/descendant workflow.
 - Docker selection requires host PID visibility, the privileges needed by
   perf/eBPF, and access to `/var/run/docker.sock`.
 - Kubernetes selection requires the supplied privileged, `hostPID` DaemonSet;
@@ -31,8 +39,8 @@ pprof and diagnostics files remain authoritative.
 The release archives are:
 
 ```text
-rustprofile-0.1.0-linux-aarch64.tar.gz
-rustprofile-0.1.0-linux-x86_64.tar.gz
+rustprofile-0.2.1-linux-aarch64.tar.gz
+rustprofile-0.2.1-linux-x86_64.tar.gz
 ```
 
 `SHA256SUMS` is shipped with the archives. From the directory containing the
@@ -47,7 +55,7 @@ sha256sum -c SHA256SUMS
 Choose the archive matching both the host and target process architecture:
 
 ```sh
-tar -xzf rustprofile-0.1.0-linux-aarch64.tar.gz
+tar -xzf rustprofile-0.2.1-linux-aarch64.tar.gz
 sudo install -m 0755 rustprofile /usr/local/bin/rustprofile
 ```
 
@@ -76,6 +84,36 @@ sudo rustprofile record \
 
 `--duration 0` records until the target exits or the recorder receives
 SIGINT/SIGTERM.
+Add `--profiles cpu` on Linux 5.4-5.11.
+
+Start a command suspended, attach, then continue it. On cgroup-v2 hosts this
+also includes descendants in CPU/off-CPU collection:
+
+```sh
+sudo rustprofile launch --profiles cpu,off-cpu --firefox-profile json \
+  --duration 10m --window 60s --output ./profiles \
+  -- ./my-api --port 8080
+```
+
+Import an existing capture and optionally create a Firefox profile:
+
+```sh
+rustprofile import --input perf.data --format auto --window 60s \
+  --firefox-profile jslb --output ./imported
+```
+
+Serve a Firefox JSON/JSLB profile and its symbol/source/assembly API:
+
+```sh
+rustprofile serve --profile ./profiles/firefox-session-000000-123.json.gz \
+  --listen 127.0.0.1:8080
+```
+
+Serve all Firefox windows in a directory with the built-in gallery:
+
+```sh
+rustprofile serve --directory ./profiles --listen 127.0.0.1:8080
+```
 
 Docker targets can be selected by container ID or name:
 
@@ -118,7 +156,9 @@ NAMESPACE/NAME` selects Kubernetes. `--container NAME` is only valid with
   initialization budget, stream into temporary cache files, and enforce a
   512 MiB per-file limit.
 
-`check` validates root/kernel/architecture/thread and perf/eBPF access, and
+`check` validates root/kernel/architecture/thread and perf access, probes
+lifecycle and off-CPU eBPF loading, and probes heap eBPF loading when the
+kernel meets the heap baseline, and
 reports mapped modules, build IDs, unwind sections, symbols, and allocator
 selection. It does not start a recording.
 
@@ -127,7 +167,8 @@ selection. It does not start a recording.
 - `--pid PID`, `--docker-container ID_OR_NAME`, or `--k8s-pod
   NAMESPACE/NAME`: choose exactly one target. Kubernetes also accepts
   `--container NAME`.
-- `--profiles cpu,heap`: comma-delimited profile types; default `cpu,heap`.
+- `--profiles cpu,heap,off-cpu`: comma-delimited profile types; default
+  `cpu,heap`.
 - `--duration DURATION`: default `60s`; humantime syntax, or `0` for no limit.
 - `--window DURATION`: default `60s`; must be greater than zero.
 - `--unwind auto|fp|dwarf`: default `auto`.
@@ -137,11 +178,23 @@ selection. It does not start a recording.
 - `--allocator auto|rust|system`: default `auto`.
 - `--output DIR`: output directory; default `.`.
 - `--keep-windows N`: session retention count; default `60`.
-- `--max-stacks N`: default `65,536`; maximum distinct stacks in each CPU or
-  heap output window. Existing stacks continue accumulating; new stacks after
-  the cap are omitted.
+- `--max-stacks N`: default `65,536`; maximum distinct stacks in each CPU,
+  off-CPU, or heap output window. Existing stacks continue accumulating; new
+  stacks after the cap are omitted.
+- `--max-pending-events N`: default `262,144`; bounded timestamp-ordering
+  buffer for perf/eBPF events.
+- `--event-reorder-window DURATION`: default `100ms`; timestamp skew tolerated
+  while ordering event sources, and it cannot exceed `--window`.
+- `--max-timeline-samples N`: default `65,536`; maximum timestamped samples
+  retained for each Firefox output or OTLP timeline window. Excess samples are
+  omitted from the enabled timeline output and counted in diagnostics.
+- `--otlp-timeline`: disabled by default; with OTLP enabled, send the bounded
+  timestamped CPU timeline instead of an aggregated CPU source. The local CPU
+  pprof remains available.
+- `--firefox-profile json|jslb`: write one bounded Firefox processed profile per
+  completed window.
 - `--svg`: disabled by default; also write self-contained static SVG flame graphs
-  for completed CPU and heap windows.
+  for completed CPU, off-CPU, and heap windows.
 - `--allow-partial`: allow supported subsets or leaf-only CPU data when a
   profile capability is unavailable.
 - `--symbol-dir DIR` and `--debuginfod URL`: the same symbol options as
@@ -168,6 +221,10 @@ cpu-<session>-<index>-<start-unix-nanos>.pb.gz
 cpu-<session>-<index>-<start-unix-nanos>.svg       (with --svg)
 heap-<session>-<index>-<start-unix-nanos>.pb.gz
 heap-<session>-<index>-<start-unix-nanos>.svg       (with --svg)
+off-cpu-<session>-<index>-<start-unix-nanos>.pb.gz
+off-cpu-<session>-<index>-<start-unix-nanos>.svg       (with --svg)
+firefox-<session>-<index>-<start-unix-nanos>.json.gz
+firefox-<session>-<index>-<start-unix-nanos>.jslb.gz
 diagnostics-<session>-<index>-<start-unix-nanos>.json
 ```
 
@@ -176,7 +233,7 @@ contain `samples/count` and `cpu/nanoseconds`. Heap samples contain
 `alloc_objects/count`, `alloc_space/bytes`, `inuse_objects/count`, and
 `inuse_space/bytes`; in-use values include only sampled allocations observed
 since attach. Samples include `process.pid` and available container/Kubernetes
-identity labels. The diagnostics JSON is schema version 2 and includes target
+identity labels. The diagnostics JSON is schema version 3 and includes target
 metadata, output paths, warnings, allocator probe information, CPU
 loss/malformed counters, CPU nanoseconds, `aggregation_dropped_samples`, and
 `aggregation_dropped_nanoseconds`; heap export totals, `since_attach`, and
@@ -185,15 +242,21 @@ loss/malformed counters, CPU nanoseconds, `aggregation_dropped_samples`, and
 When the stack cap is reached, window warnings also identify the aggregation
 drops. Heap live/free state continues to be tracked even when a new stack is
 omitted. When enabled, diagnostics also include `otlp.status`, attempts,
-rejected profiles, and a sanitized error.
+rejected profiles, and a sanitized error. With `--otlp-timeline`, they also
+include `timeline_enabled`, encoded `timeline_samples`,
+`timeline_dropped_samples`, and `timeline_timestamp_errors`.
+Firefox timeline drops are reported in `firefox.dropped_samples` and
+`event_order.timeline_events_dropped`; import diagnostics use
+`timeline_dropped_samples`.
 
-`--max-stacks` applies independently to each CPU and heap output window. Once
+`--max-stacks` applies independently to each CPU, off-CPU, and heap output window. Once
 the cap is full, existing stacks continue to accumulate while only newly
 observed distinct stacks are omitted from pprof, OTLP, and optional SVG output.
 
 With `--svg`, the asynchronous output worker also atomically generates a
-self-contained static flame graph for each requested CPU or heap profile. CPU
-frame widths use `cpu/nanoseconds`; heap frame widths use `inuse_space/bytes`.
+self-contained static flame graph for each requested CPU, off-CPU, or heap
+profile. CPU and off-CPU frame widths use nanoseconds; heap frame widths use
+`inuse_space/bytes`.
 SVGs contain no scripts and are derived visualizations only: pprof and OTLP
 remain the authoritative machine-readable formats. Rendering is capped at
 100,000 frames/nodes; when exceeded, only the SVG is truncated and the graph
@@ -202,7 +265,17 @@ removed with the other window files by `--keep-windows`. SVG rendering streams
 directly into the atomic temporary file; it does not first construct the
 complete SVG text in memory.
 
-The output worker publishes every output file atomically. If CPU/heap pprof,
+The output worker keeps collection ahead of slow output. If a previous window
+is still being written when the next window is submitted, it sheds only derived
+outputs for that next window: optional SVG files and Firefox output are skipped,
+and a configured OTLP export is marked `dropped`. CPU/off-CPU/heap pprof files
+and diagnostics remain authoritative and are still written. The diagnostics
+`output_backpressure` object records `derived_outputs_shed`, the pending-window
+count, the number of skipped derived files, and whether OTLP was skipped. A
+full OTLP export queue is reported separately as `otlp.status: dropped`; local
+files are never removed because an export is unavailable.
+
+The output worker publishes every output file atomically. If CPU/off-CPU/heap pprof,
 optional SVG, or diagnostics generation fails, already-published files for that
 window are removed. `wrote` lines are printed only after retention succeeds.
 `--keep-windows` removes expired files from this recording session only,
@@ -213,11 +286,11 @@ including optional SVGs; older sessions are not pruned.
 From the source checkout, build the included image on a Linux builder:
 
 ```sh
-docker build -t rustprofile:0.1.0 .
+docker build -t rustprofile:0.2.1 .
 docker run --rm --privileged --pid=host \
   --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock,readonly \
   --mount type=bind,src="$PWD/profiles",dst=/profiles \
-  rustprofile:0.1.0 record --docker-container my-api \
+  rustprofile:0.2.1 record --docker-container my-api \
   --duration 10m --window 60s --output /profiles
 ```
 
@@ -265,6 +338,45 @@ Docker inspect and Kubernetes Pod API control-plane requests have a 5-second
 timeout and reject responses larger than 4 MiB. These bounds apply to target
 identity resolution, not to local profile files or OTLP payloads.
 
+## Launch, import, serve, and scope
+
+`launch` sends `SIGSTOP` to the child before preflight and collector
+attachment, then resumes it. It creates a temporary cgroup-v2 boundary when
+possible so CPU/off-CPU collectors reconcile descendants. If cgroup creation
+is unavailable, `--allow-partial` permits an exact-child-PID fallback. Heap
+probes remain scoped to the init/root process and diagnostics report
+`mixed_process_and_cgroup` for that combination.
+
+`import --input PATH` parses the timestamped IP/callchain samples from a
+regular `perf.data` or simpleperf file. `--format auto` is the default, with
+`perf-data` and `simpleperf` available as explicit hints. Imported pprof keeps
+raw addresses and PID/TID labels; no live probe or DWARF unwind is attached.
+`--max-stacks` bounds distinct attributed stacks per imported window, and
+`--max-timeline-samples` bounds its Firefox timeline. Import keeps at most four
+timestamp windows pending and caps tracked PID/TID state at 65,536 pairs.
+
+`serve` requires exactly one of `--profile PATH` and `--directory DIR`.
+`--profile` provides the legacy `GET /profile.json` (`application/json` for JSON
+and `application/octet-stream` for JSLB); `--directory` scans at most 16,384
+directory entries named `firefox-*.json.gz` or `firefox-*.jslb.gz` and returns
+at most 4,096 profiles in the built-in gallery at `GET /`. The gallery lists
+windows at `GET /api/profiles` and decodes a selected window at
+`GET /api/profile/{sha256-filename-id}`. Both sources provide `GET /healthz`
+and the Firefox Profiler/Samply-compatible symbol/source/assembly JSON POST
+APIs. Compressed input is capped at 512 MiB and decompressed profile data at
+128 MiB; diagnostics larger than 1 MiB are ignored. Viewer samples/stacks are
+capped at 65,536, functions at 262,144, and threads at 4,096. POST bodies are
+capped at 8 MiB and responses at 32 MiB. CORS is disabled by default;
+`--cors-origin ORIGIN` enables an exact origin and its preflight (otherwise
+`OPTIONS` is 405). Loopback listeners need no token, while non-loopback
+listeners require `--bearer-token`.
+
+For a running `record --pid` session, child processes are intentionally not
+implicitly followed. Container targets use the resolved cgroup for CPU and
+off-CPU, while heap remains init-process scoped. CPU perf ordering is bounded
+by `--max-pending-events` and `--event-reorder-window`; off-CPU uses a separate
+bounded interval queue. Drops and forced flushes are recorded in diagnostics.
+
 ## OTLP Profiles export
 
 The exporter is pinned to `opentelemetry-proto v1.11.0` and sends the
@@ -310,9 +422,19 @@ capped at 1 MiB.
 The gzip request body is prepared once per window and reused across retries.
 The bounded queue holds four windows. Export failures never remove local files:
 diagnostics report `pending`, `exported`, `partial`, `failed`, or `dropped`.
-At shutdown, retries stop and queued windows that were not flushed are marked
-`failed` for a bounded exit. There is no durable on-disk OTLP spool or automatic
-later replay; retain the local files for recovery.
+Normal shutdown drains queued windows using the configured retry policy. An
+abnormal teardown cancels retries and marks any remaining queued windows
+`failed`. There is no durable on-disk OTLP spool or automatic later replay;
+retain the local files for recovery.
+
+`--otlp-timeline` changes only the OTLP CPU source: the bounded timeline is sent
+as one `cpu/nanoseconds` profile, and the aggregated CPU source is not sent a
+second time. Each timeline sample has aligned `values` and
+`timestamps_unix_nano` plus pprof labels decoded as attributes such as
+`process.pid`, `thread.id`, and `thread.name`. Raw perf timestamps are converted
+to Unix nanoseconds inside the window; unconvertible samples are omitted and
+counted by `timeline_timestamp_errors`. The `--max-timeline-samples` cap applies
+to this OTLP timeline as well as Firefox and does not require a Firefox file.
 
 ## FP, DWARF, and partial profiles
 
@@ -356,6 +478,9 @@ not included in in-use values.
 - If the target executes a new image, the current window ends with a warning;
   preflight, unwind mode, symbols, and collectors are refreshed for the new
   image. Auto calibration also re-preflights and restarts after an `exec`.
+- Linux 5.8 and newer prefer lifecycle eBPF events. Linux 5.4-5.7, or a newer
+  kernel where lifecycle eBPF attachment fails, falls back to one-second
+  procfs reconciliation and records a diagnostics warning.
 
 ## Validation status
 
@@ -363,3 +488,5 @@ The arm64 OrbStack Linux runtime has been validated as `root`, including the
 CPU FP path, DWARF fallback, stripped/no-CFI cases, system heap, and pprof
 decoding. The x86_64 release currently has release-build and CLI-smoke
 evidence only; native x86_64 perf/eBPF runtime validation has not been claimed.
+The Linux 5.4 compatibility path still needs independent runtime validation on
+a native 5.4 kernel.
