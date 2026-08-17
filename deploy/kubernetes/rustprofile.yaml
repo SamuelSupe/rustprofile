@@ -52,7 +52,7 @@ spec:
       terminationGracePeriodSeconds: 10
       containers:
         - name: rustprofile
-          image: rustprofile:0.1.0
+          image: rustprofile:0.2.1
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c"]
           args:

@@ -79,14 +79,21 @@ pub fn inspect(
     }
     let has_unwind_info = has_nonempty_section(&executable_object, ".eh_frame")
         || has_nonempty_section(&executable_object, ".debug_frame");
-    let allocator_report = select_allocator(allocator, rust_candidate, system_candidate);
+    let mut allocator_report = select_allocator(allocator, rust_candidate, system_candidate);
 
     let mut warnings = Vec::new();
     let mut errors = Vec::new();
     if !kernel_version.is_supported() {
         errors.push(format!(
-            "kernel {kernel_release} is below the required Linux 5.8 baseline"
+            "kernel {kernel_release} is below the required Linux 5.4 baseline"
         ));
+    }
+    if !kernel_version.supports_heap() {
+        let reason = format!(
+            "heap profiling requires Linux 5.12 or newer; kernel {kernel_release} supports CPU profiling only"
+        );
+        allocator_report.complete = false;
+        allocator_report.reason = Some(reason);
     }
     if !running_as_root {
         errors.push("rustprofile MVP must run as root".to_owned());
@@ -118,7 +125,7 @@ pub fn inspect(
     }
 
     Ok(CheckReport {
-        schema_version: 2,
+        schema_version: 3,
         pid,
         target,
         executable,
@@ -130,6 +137,7 @@ pub fn inspect(
         modules,
         has_unwind_info,
         allocator: allocator_report,
+        capabilities: Default::default(),
         warnings,
         errors,
     })

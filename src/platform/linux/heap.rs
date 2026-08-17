@@ -2,15 +2,19 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     path::Path,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use anyhow::{Context, Result, bail};
-use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
+use crossbeam_channel::{Receiver, Sender, TrySendError, bounded};
 use libbpf_rs::{Link, MapCore, MapFlags, Object, ObjectBuilder, RingBuffer, RingBufferBuilder};
 use object::{Object as _, ObjectSegment, ObjectSymbol, SymbolKind};
 
 use crate::{
-    config::{DEFAULT_MAX_FRAMES, UnwindMode},
+    config::{DEFAULT_MAX_FRAMES, DEFAULT_STACK_BYTES, UnwindMode},
     diagnostics::{AllocatorReport, HeapWindowDiagnostics},
     heap::{HeapEvent, HeapEventKind, HeapState},
     maps::{ExecutableRanges, read_process_maps},
@@ -34,6 +38,7 @@ const EVENT_STACK: u32 = 1;
 const EVENT_ALLOC: u32 = 2;
 const EVENT_FREE: u32 = 3;
 const EVENT_BUFFER_POOL_CAPACITY: usize = 256;
+const EVENT_QUEUE_CAPACITY: usize = 4096;
 
 static HEAP_BPF: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/heap.bpf.o"));
 
@@ -56,6 +61,7 @@ pub struct HeapCollector {
     object: Object,
     receiver: Receiver<Vec<u8>>,
     recycle_sender: Sender<Vec<u8>>,
+    userspace_drops: Arc<AtomicU64>,
     pending_stacks: HashMap<u64, Vec<u64>>,
     state: HeapState,
     dwarf: Option<DwarfUnwinder>,
@@ -122,8 +128,14 @@ impl HeapCollector {
         let mut object = load_heap_object(allocation_interval, mode)?;
         let links = attach_allocator_programs(&mut object, pid, &process_path, family, &offsets)?;
 
-        let (sender, receiver) = unbounded();
+        let (sender, receiver) = bounded(EVENT_QUEUE_CAPACITY);
         let (recycle_sender, recycle_receiver) = bounded::<Vec<u8>>(EVENT_BUFFER_POOL_CAPACITY);
+        for _ in 0..EVENT_BUFFER_POOL_CAPACITY {
+            let _ = recycle_sender.try_send(Vec::with_capacity(HEADER_SIZE + DEFAULT_STACK_BYTES));
+        }
+        let userspace_drops = Arc::new(AtomicU64::new(0));
+        let callback_drops = Arc::clone(&userspace_drops);
+        let callback_recycle = recycle_sender.clone();
         let mut ring_builder = RingBufferBuilder::new();
         let events = object
             .maps()
@@ -133,7 +145,14 @@ impl HeapCollector {
             let mut bytes = recycle_receiver.try_recv().unwrap_or_default();
             bytes.clear();
             bytes.extend_from_slice(data);
-            let _ = sender.send(bytes);
+            if let Err(error) = sender.try_send(bytes) {
+                let mut bytes = match error {
+                    TrySendError::Full(bytes) | TrySendError::Disconnected(bytes) => bytes,
+                };
+                bytes.clear();
+                let _ = callback_recycle.try_send(bytes);
+                callback_drops.fetch_add(1, Ordering::Relaxed);
+            }
             0
         })?;
         let ring = ring_builder.build()?;
@@ -149,6 +168,7 @@ impl HeapCollector {
             object,
             receiver,
             recycle_sender,
+            userspace_drops,
             pending_stacks: HashMap::new(),
             state: HeapState::with_max_stacks(max_stacks),
             dwarf,
@@ -213,7 +233,8 @@ impl HeapCollector {
             aggregation_dropped_inuse_objects: aggregation_drops.inuse_objects,
             aggregation_dropped_inuse_space: aggregation_drops.inuse_space,
             live_samples: self.state.live_sample_count() as u64,
-            ring_buffer_drops: delta.0[STAT_RINGBUF_DROPS],
+            ring_buffer_drops: delta.0[STAT_RINGBUF_DROPS]
+                .saturating_add(self.userspace_drops.swap(0, Ordering::Relaxed)),
             map_evictions: delta.0[STAT_MAP_EVICTIONS],
             map_update_failures: delta.0[STAT_MAP_UPDATE_FAILURES],
             pending_overwrites: delta.0[STAT_PENDING_OVERWRITES],

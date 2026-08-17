@@ -342,7 +342,7 @@ fn native_cpu_windows_are_pprof_decodable_and_diagnostics_reconcile() {
         let bytes = fs::read(&path).expect("read diagnostics");
         let diagnostics: WindowDiagnostics =
             serde_json::from_slice(&bytes).expect("diagnostics JSON schema");
-        assert_eq!(diagnostics.schema_version, 2);
+        assert_eq!(diagnostics.schema_version, 3);
         assert_eq!(
             diagnostics.pid,
             i32::try_from(target.pid()).expect("pid fits i32")
@@ -546,7 +546,7 @@ fn native_system_allocator_windows_report_sampled_heap_semantics() {
         let diagnostics: WindowDiagnostics =
             serde_json::from_slice(&fs::read(&path).expect("read heap diagnostics"))
                 .expect("heap diagnostics JSON schema");
-        assert_eq!(diagnostics.schema_version, 2);
+        assert_eq!(diagnostics.schema_version, 3);
         assert!(matches!(
             diagnostics.target.kind,
             rustprofile::TargetKind::Process

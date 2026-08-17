@@ -5,13 +5,13 @@ use std::{
     path::Path,
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use flate2::{Compression, write::GzEncoder};
 use prost::Message;
 use serde::Serialize;
 
 use crate::{
-    profile::{CpuValues, HeapValues, Stack},
+    profile::{AttributedStack, CpuValues, HeapValues, OffCpuValues, Stack, TimedStackSample},
     symbol::{MappingInfo, ResolvedLocation, SymbolizedLine, Symbolizer},
 };
 
@@ -149,7 +149,7 @@ pub struct ExportStats {
 
 pub fn write_cpu_profile(
     path: &Path,
-    samples: &HashMap<Stack, CpuValues>,
+    samples: &HashMap<AttributedStack, CpuValues>,
     symbolizer: &mut Symbolizer,
     time_nanos: i64,
     duration_nanos: i64,
@@ -163,15 +163,137 @@ pub fn write_cpu_profile(
     builder.profile.period_type = Some(cpu_type);
     builder.profile.period = i64::from(1_000_000_000_u32 / frequency.max(1));
     builder.profile.default_sample_type = builder.intern("cpu");
-    let labels = builder.sample_labels(labels);
-
-    for (stack, values) in samples {
-        builder.add_sample(stack, vec![values.samples, values.nanoseconds], &labels);
+    for (key, values) in samples {
+        let mut sample_labels = builder.sample_labels(labels);
+        sample_labels.extend(builder.thread_labels(key.pid, key.tid, key.thread_name.as_deref()));
+        builder.add_sample(
+            &key.stack,
+            vec![values.samples, values.nanoseconds],
+            &sample_labels,
+        );
     }
     let stats = builder.stats();
     let profile = builder.finish();
     write_profile_atomic(path, &profile)?;
     Ok((stats, profile))
+}
+
+pub fn write_raw_cpu_profile(
+    path: &Path,
+    samples: &HashMap<AttributedStack, CpuValues>,
+    time_nanos: i64,
+    duration_nanos: i64,
+    period_nanos: i64,
+) -> Result<Profile> {
+    let mut builder = ProfileBuilder::new_raw(time_nanos, duration_nanos);
+    let samples_type = builder.value_type("samples", "count");
+    let cpu_type = builder.value_type("cpu", "nanoseconds");
+    builder.profile.sample_type = vec![samples_type, cpu_type.clone()];
+    builder.profile.period_type = Some(cpu_type);
+    builder.profile.period = period_nanos.max(1);
+    builder.profile.default_sample_type = builder.intern("cpu");
+    for (key, values) in samples {
+        let labels = builder.thread_labels(key.pid, key.tid, key.thread_name.as_deref());
+        builder.add_sample(
+            &key.stack,
+            vec![values.samples, values.nanoseconds],
+            &labels,
+        );
+    }
+    let profile = builder.finish();
+    write_profile_atomic(path, &profile)?;
+    Ok(profile)
+}
+
+pub fn build_cpu_timeline_profile(
+    samples: &[TimedStackSample],
+    timestamps_unix_nano: &[Option<u64>],
+    symbolizer: Option<&mut Symbolizer>,
+    time_nanos: i64,
+    duration_nanos: i64,
+    frequency: u32,
+    labels: &[(String, String)],
+) -> Result<(ExportStats, Profile, Vec<u64>)> {
+    if samples.len() != timestamps_unix_nano.len() {
+        bail!("CPU timeline samples and timestamps have different lengths");
+    }
+    let mut builder = match symbolizer {
+        Some(symbolizer) => ProfileBuilder::new(symbolizer, time_nanos, duration_nanos),
+        None => ProfileBuilder::new_raw(time_nanos, duration_nanos),
+    };
+    let cpu_type = builder.value_type("cpu", "nanoseconds");
+    builder.profile.sample_type = vec![cpu_type.clone()];
+    builder.profile.period_type = Some(cpu_type);
+    builder.profile.period = i64::from(1_000_000_000_u32 / frequency.max(1));
+    builder.profile.default_sample_type = builder.intern("cpu");
+    let mut encoded_timestamps = Vec::with_capacity(samples.len());
+    for (sample, timestamp) in samples.iter().zip(timestamps_unix_nano) {
+        let Some(timestamp) = timestamp else {
+            continue;
+        };
+        let mut sample_labels = builder.sample_labels(labels);
+        sample_labels.extend(builder.thread_labels(
+            sample.pid,
+            sample.tid,
+            sample.thread_name.as_deref(),
+        ));
+        builder.add_sample(
+            &sample.stack,
+            vec![i64::try_from(sample.cpu_delta).unwrap_or(i64::MAX)],
+            &sample_labels,
+        );
+        encoded_timestamps.push(*timestamp);
+    }
+    let stats = builder.stats();
+    Ok((stats, builder.finish(), encoded_timestamps))
+}
+
+pub fn write_off_cpu_profile(
+    path: &Path,
+    samples: &HashMap<AttributedStack, OffCpuValues>,
+    symbolizer: &mut Symbolizer,
+    time_nanos: i64,
+    duration_nanos: i64,
+    labels: &[(String, String)],
+) -> Result<(ExportStats, Profile)> {
+    let mut builder = ProfileBuilder::new(symbolizer, time_nanos, duration_nanos);
+    let event_type = builder.value_type("off_cpu_events", "count");
+    let duration_type = builder.value_type("off_cpu", "nanoseconds");
+    builder.profile.sample_type = vec![event_type, duration_type];
+    builder.profile.default_sample_type = builder.intern("off_cpu");
+    for (key, values) in samples {
+        let mut sample_labels = builder.sample_labels(labels);
+        sample_labels.extend(builder.thread_labels(key.pid, key.tid, key.thread_name.as_deref()));
+        builder.add_sample(
+            &key.stack,
+            vec![values.events, values.nanoseconds],
+            &sample_labels,
+        );
+    }
+    let stats = builder.stats();
+    let profile = builder.finish();
+    write_profile_atomic(path, &profile)?;
+    Ok((stats, profile))
+}
+
+pub fn write_raw_off_cpu_profile(
+    path: &Path,
+    samples: &HashMap<AttributedStack, OffCpuValues>,
+    time_nanos: i64,
+    duration_nanos: i64,
+) -> Result<Profile> {
+    let mut builder = ProfileBuilder::new_raw(time_nanos, duration_nanos);
+    let event_type = builder.value_type("off_cpu_events", "count");
+    let duration_type = builder.value_type("off_cpu", "nanoseconds");
+    builder.profile.sample_type = vec![event_type, duration_type];
+    builder.profile.default_sample_type = builder.intern("off_cpu");
+    for (key, values) in samples {
+        let labels = builder.thread_labels(key.pid, key.tid, key.thread_name.as_deref());
+        builder.add_sample(&key.stack, vec![values.events, values.nanoseconds], &labels);
+    }
+    let profile = builder.finish();
+    write_profile_atomic(path, &profile)?;
+    Ok(profile)
 }
 
 pub fn write_heap_profile(
@@ -270,7 +392,7 @@ pub(crate) fn sync_directory(path: &Path) -> io::Result<()> {
 
 struct ProfileBuilder<'a> {
     profile: Profile,
-    symbolizer: &'a mut Symbolizer,
+    symbolizer: Option<&'a mut Symbolizer>,
     strings: HashMap<String, i64>,
     mappings: HashMap<MappingInfo, u64>,
     functions: HashMap<(String, String, Option<String>), u64>,
@@ -301,7 +423,38 @@ impl<'a> ProfileBuilder<'a> {
         strings.insert(String::new(), 0);
         Self {
             profile,
-            symbolizer,
+            symbolizer: Some(symbolizer),
+            strings,
+            mappings: HashMap::new(),
+            functions: HashMap::new(),
+            locations: HashMap::new(),
+            stats: ExportStats::default(),
+        }
+    }
+
+    fn new_raw(time_nanos: i64, duration_nanos: i64) -> Self {
+        let profile = Profile {
+            sample_type: Vec::new(),
+            sample: Vec::new(),
+            mapping: Vec::new(),
+            location: Vec::new(),
+            function: Vec::new(),
+            string_table: vec![String::new()],
+            drop_frames: 0,
+            keep_frames: 0,
+            time_nanos,
+            duration_nanos,
+            period_type: None,
+            period: 0,
+            comment: Vec::new(),
+            default_sample_type: 0,
+            doc_url: 0,
+        };
+        let mut strings = HashMap::new();
+        strings.insert(String::new(), 0);
+        Self {
+            profile,
+            symbolizer: None,
             strings,
             mappings: HashMap::new(),
             functions: HashMap::new(),
@@ -341,6 +494,32 @@ impl<'a> ProfileBuilder<'a> {
             .collect()
     }
 
+    fn thread_labels(&mut self, pid: u32, tid: u32, name: Option<&str>) -> Vec<Label> {
+        let mut labels = vec![
+            Label {
+                key: self.intern("process.pid"),
+                str: 0,
+                num: i64::from(pid),
+                num_unit: 0,
+            },
+            Label {
+                key: self.intern("thread.id"),
+                str: 0,
+                num: i64::from(tid),
+                num_unit: 0,
+            },
+        ];
+        if let Some(name) = name {
+            labels.push(Label {
+                key: self.intern("thread.name"),
+                str: self.intern(name),
+                num: 0,
+                num_unit: 0,
+            });
+        }
+        labels
+    }
+
     fn add_sample(&mut self, stack: &Stack, values: Vec<i64>, labels: &[Label]) {
         let location_id = stack
             .0
@@ -358,8 +537,20 @@ impl<'a> ProfileBuilder<'a> {
         if let Some(id) = self.locations.get(&address) {
             return *id;
         }
-        let resolved = self.symbolizer.resolve(address);
         self.stats.total_locations += 1;
+        let Some(symbolizer) = self.symbolizer.as_deref_mut() else {
+            let id = self.profile.location.len() as u64 + 1;
+            self.profile.location.push(Location {
+                id,
+                mapping_id: 0,
+                address,
+                line: Vec::new(),
+                is_folded: false,
+            });
+            self.locations.insert(address, id);
+            return id;
+        };
+        let resolved = symbolizer.resolve(address);
         if resolved.is_symbolized() {
             self.stats.symbolized_locations += 1;
         }

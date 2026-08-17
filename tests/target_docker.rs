@@ -106,7 +106,8 @@ fn docker_selector_keeps_container_identity_in_check_report() {
             String::from_utf8_lossy(&output.stderr)
         )
     });
-    assert_eq!(report["schema_version"], 2);
+    assert_eq!(report["schema_version"], 3);
+    assert!(report["capabilities"].is_object());
     assert_eq!(report["pid"].as_u64(), Some(u64::from(pid)));
     assert_eq!(report["target"]["kind"], "docker");
     assert_eq!(report["target"]["pid"].as_u64(), Some(u64::from(pid)));

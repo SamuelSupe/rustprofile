@@ -7,6 +7,7 @@
 //! without depending on a collector installation.
 
 use std::{
+    collections::HashSet,
     fs,
     io::{Read, Write},
     net::{TcpListener, TcpStream},
@@ -71,6 +72,10 @@ struct InstrumentationScope {
     name: String,
     #[prost(string, tag = "2")]
     version: String,
+    #[prost(message, repeated, tag = "3")]
+    attributes: Vec<KeyValue>,
+    #[prost(uint32, tag = "4")]
+    dropped_attributes_count: u32,
 }
 
 #[derive(Clone, PartialEq, Message)]
@@ -151,8 +156,12 @@ struct ValueType {
 struct Sample {
     #[prost(int32, tag = "1")]
     stack_index: i32,
+    #[prost(int32, repeated, packed = "true", tag = "2")]
+    attribute_indices: Vec<i32>,
     #[prost(int64, repeated, packed = "true", tag = "4")]
     values: Vec<i64>,
+    #[prost(fixed64, repeated, packed = "true", tag = "5")]
+    timestamps_unix_nano: Vec<u64>,
 }
 
 #[derive(Clone, PartialEq, Message)]
@@ -163,10 +172,22 @@ struct ProfilesDictionary {
     location_table: Vec<Location>,
     #[prost(message, repeated, tag = "3")]
     function_table: Vec<Function>,
+    #[prost(message, repeated, tag = "6")]
+    attribute_table: Vec<KeyValueAndUnit>,
     #[prost(string, repeated, tag = "5")]
     string_table: Vec<String>,
     #[prost(message, repeated, tag = "7")]
     stack_table: Vec<Stack>,
+}
+
+#[derive(Clone, PartialEq, Message)]
+struct KeyValueAndUnit {
+    #[prost(int32, tag = "1")]
+    key_strindex: i32,
+    #[prost(message, optional, tag = "2")]
+    value: Option<AnyValue>,
+    #[prost(int32, tag = "3")]
+    unit_strindex: i32,
 }
 
 #[derive(Clone, PartialEq, Message)]
@@ -360,6 +381,28 @@ fn resource_string(resource: &Resource, key: &str) -> Option<String> {
     })
 }
 
+fn dictionary_string(dictionary: &ProfilesDictionary, index: i32) -> &str {
+    dictionary
+        .string_table
+        .get(usize::try_from(index).expect("dictionary string index is non-negative"))
+        .map(String::as_str)
+        .expect("dictionary string index is in range")
+}
+
+fn sample_attribute_keys(dictionary: &ProfilesDictionary, sample: &Sample) -> Vec<String> {
+    sample
+        .attribute_indices
+        .iter()
+        .map(|index| {
+            let attribute = dictionary
+                .attribute_table
+                .get(usize::try_from(*index).expect("attribute index is non-negative"))
+                .expect("sample attribute index is in range");
+            dictionary_string(dictionary, attribute.key_strindex).to_owned()
+        })
+        .collect()
+}
+
 fn preflight_unavailable(output: &std::process::Output) -> bool {
     let text = format!(
         "{}\n{}",
@@ -368,7 +411,7 @@ fn preflight_unavailable(output: &std::process::Output) -> bool {
     );
     [
         "kernel ",
-        "perf/eBPF access probe failed",
+        "perf access probe failed",
         "rustprofile MVP must run as root",
         "failed to load",
         "failed to attach tracepoint",
@@ -409,6 +452,9 @@ fn otlp_http_retries_partial_success_and_emits_v111_profiles() {
             "--unwind",
             "fp",
             "--allow-partial",
+            "--otlp-timeline",
+            "--max-timeline-samples",
+            "1",
             "--output",
             output_dir
                 .path()
@@ -498,43 +544,113 @@ fn otlp_http_retries_partial_success_and_emits_v111_profiles() {
         .expect("instrumentation scope");
     assert_eq!(scope.name, "rustprofile");
     assert!(scope.version.starts_with("0."));
+    let scope_attribute_keys = scope
+        .attributes
+        .iter()
+        .map(|attribute| attribute.key.as_str())
+        .collect::<HashSet<_>>();
+    assert!(
+        scope_attribute_keys.contains("pprof.scope.sample_type_order"),
+        "OTLP scope must preserve pprof sample type ordering"
+    );
+    assert!(
+        scope_attribute_keys.contains("pprof.scope.default_sample_type"),
+        "OTLP scope must preserve the pprof default sample type"
+    );
     let profiles = &resource_profiles.scope_profiles[0].profiles;
     assert_eq!(
         profiles.len(),
-        2,
-        "CPU pprof sample types map to two OTLP profiles"
+        1,
+        "a CPU timeline must emit one OTLP profile, not one profile per pprof value"
     );
-    for profile in profiles {
-        assert_eq!(profile.profile_id.len(), 16);
-        assert!(profile.profile_id.iter().any(|byte| *byte != 0));
-        assert!(profile.sample_type.is_some());
-        assert!(profile.period_type.is_some());
-        assert!(
-            profile
-                .samples
-                .iter()
-                .all(|sample| !sample.values.is_empty())
-        );
-    }
     let dictionary = payload
         .dictionary
         .as_ref()
         .expect("shared profile dictionary");
+    let mut profile_types = HashSet::new();
+    let mut profile_ids = HashSet::new();
+    let mut sample_attribute_key_set = HashSet::new();
+    for profile in profiles {
+        assert_eq!(profile.profile_id.len(), 16);
+        assert!(profile.profile_id.iter().any(|byte| *byte != 0));
+        assert!(
+            profile_ids.insert(profile.profile_id.clone()),
+            "profile IDs must be unique"
+        );
+        assert!(profile.sample_type.is_some());
+        assert!(profile.period_type.is_some());
+        assert!(profile.time_unix_nano > 0);
+        assert!(profile.duration_nano > 0);
+        profile_types.insert(dictionary_string(
+            dictionary,
+            profile
+                .sample_type
+                .as_ref()
+                .expect("sample type")
+                .type_strindex,
+        ));
+        assert!(
+            profile.samples.iter().all(|sample| {
+                !sample.values.is_empty()
+                    && sample.values.len() == 1
+                    && sample.values.len() == sample.timestamps_unix_nano.len()
+                    && sample.values.iter().all(|value| *value > 0)
+                    && sample.timestamps_unix_nano.iter().all(|timestamp| {
+                        *timestamp >= profile.time_unix_nano
+                            && *timestamp
+                                <= profile.time_unix_nano.saturating_add(profile.duration_nano)
+                    })
+                    && !sample.attribute_indices.is_empty()
+            }),
+            "timeline samples must carry aligned values, timestamps, and attributes"
+        );
+        for sample in &profile.samples {
+            sample_attribute_key_set.extend(sample_attribute_keys(dictionary, sample));
+        }
+    }
+    assert_eq!(
+        profile_types.len(),
+        1,
+        "timeline must not duplicate CPU profiles"
+    );
+    assert!(profile_types.contains("cpu"));
+    for key in ["process.pid", "thread.id", "thread.name"] {
+        assert!(
+            sample_attribute_key_set.contains(key),
+            "timeline samples must preserve {key} attributes; decoded keys: {sample_attribute_key_set:?}"
+        );
+    }
+    assert!(
+        dictionary.attribute_table.len() > 1,
+        "timeline labels must be encoded in the OTLP attribute table"
+    );
     assert_eq!(
         dictionary.string_table.first().map(String::as_str),
         Some("")
-    );
-    assert!(
-        dictionary
-            .string_table
-            .iter()
-            .any(|value| value == "samples")
     );
     assert!(dictionary.string_table.iter().any(|value| value == "cpu"));
     assert_eq!(dictionary.mapping_table.first().map(|_| ()), Some(()));
     assert_eq!(dictionary.location_table.first().map(|_| ()), Some(()));
     assert_eq!(dictionary.function_table.first().map(|_| ()), Some(()));
     assert_eq!(dictionary.stack_table.first().map(|_| ()), Some(()));
+    let (mapping_index, mapping) = dictionary
+        .mapping_table
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find(|(_, mapping)| mapping.memory_start != 0)
+        .expect("a non-default mapping must be exported");
+    assert!(
+        !dictionary_string(dictionary, mapping.filename_strindex).is_empty(),
+        "mapping filename must remain addressable even without a build-id hash"
+    );
+    assert!(
+        dictionary.location_table.iter().skip(1).any(|location| {
+            location.mapping_index == i32::try_from(mapping_index).expect("mapping index fits")
+                && location.address != 0
+        }),
+        "a location must retain the non-default mapping and address"
+    );
 
     let diagnostics = fs::read_dir(output_dir.path())
         .expect("read output directory")
@@ -555,6 +671,32 @@ fn otlp_http_retries_partial_success_and_emits_v111_profiles() {
             .iter()
             .any(|item| item["otlp"]["status"] == "partial")
     );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|item| item["otlp"]["timeline_enabled"] == true)
+    );
+    assert!(diagnostics.iter().any(|item| {
+        item["otlp"]["timeline_samples"]
+            .as_u64()
+            .unwrap_or_default()
+            > 0
+    }));
+    assert!(
+        diagnostics.iter().any(|item| {
+            item["otlp"]["timeline_dropped_samples"]
+                .as_u64()
+                .unwrap_or_default()
+                > 0
+        }),
+        "the one-sample cap must be visible in OTLP diagnostics"
+    );
+    assert!(diagnostics.iter().all(|item| {
+        item["otlp"]["timeline_timestamp_errors"]
+            .as_u64()
+            .unwrap_or_default()
+            == 0
+    }));
     assert!(
         diagnostics
             .iter()

@@ -58,8 +58,22 @@ pub struct CheckReport {
     pub modules: Vec<ModuleReport>,
     pub has_unwind_info: bool,
     pub allocator: AllocatorReport,
+    pub capabilities: CapabilityReport,
     pub warnings: Vec<String>,
     pub errors: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct CapabilityReport {
+    pub perf: bool,
+    pub lifecycle_bpf: bool,
+    pub heap_bpf: bool,
+    pub off_cpu_bpf: bool,
+    pub container_cgroup: bool,
+    pub cgroup_path: Option<PathBuf>,
+    pub perf_map: bool,
+    pub jitdump: bool,
 }
 
 impl CheckReport {
@@ -86,6 +100,70 @@ pub struct CpuWindowDiagnostics {
     pub average_depth: f64,
     pub symbolized_locations: u64,
     pub total_locations: u64,
+    pub attributed_series: u64,
+    pub thread_attribution_dropped_samples: u64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct EventOrderDiagnostics {
+    pub reorder_window_nanos: u64,
+    pub max_pending_events: usize,
+    pub peak_pending_events: usize,
+    pub forced_flushes: u64,
+    pub late_events_dropped: u64,
+    pub timeline_events_dropped: u64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct OffCpuWindowDiagnostics {
+    pub requested: bool,
+    pub enabled: bool,
+    pub reason: Option<String>,
+    pub switch_out_events: u64,
+    pub completed_intervals: u64,
+    pub incomplete_intervals: u64,
+    pub nanoseconds: i64,
+    pub aggregation_dropped_events: u64,
+    pub ring_buffer_drops: u64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct FirefoxOutputDiagnostics {
+    pub enabled: bool,
+    pub format: Option<String>,
+    pub samples: u64,
+    pub dropped_samples: u64,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct JitDiagnostics {
+    pub perf_map_files: u64,
+    pub jitdump_files: u64,
+    pub mappings_loaded: u64,
+    pub mappings_dropped: u64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct TargetScopeDiagnostics {
+    pub requested: String,
+    pub effective: String,
+    pub cgroup_path: Option<PathBuf>,
+    pub degraded_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct OutputBackpressureDiagnostics {
+    pub derived_outputs_shed: bool,
+    pub pending_windows: usize,
+    pub files_skipped: u64,
+    pub otlp_skipped: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -135,6 +213,10 @@ pub struct OtlpExportDiagnostics {
     pub profiles: u32,
     pub attempts: u32,
     pub rejected_profiles: i64,
+    pub timeline_enabled: bool,
+    pub timeline_samples: u64,
+    pub timeline_dropped_samples: u64,
+    pub timeline_timestamp_errors: u64,
     pub error: Option<String>,
 }
 
@@ -145,6 +227,10 @@ impl OtlpExportDiagnostics {
             profiles: 0,
             attempts: 0,
             rejected_profiles: 0,
+            timeline_enabled: false,
+            timeline_samples: 0,
+            timeline_dropped_samples: 0,
+            timeline_timestamp_errors: 0,
             error: None,
         }
     }
@@ -163,6 +249,12 @@ pub struct WindowDiagnostics {
     pub allocator_probe: AllocatorReport,
     pub cpu: CpuWindowDiagnostics,
     pub heap: HeapWindowDiagnostics,
+    pub off_cpu: OffCpuWindowDiagnostics,
+    pub event_order: EventOrderDiagnostics,
+    pub firefox: FirefoxOutputDiagnostics,
+    pub jit: JitDiagnostics,
+    pub scope: TargetScopeDiagnostics,
+    pub output_backpressure: OutputBackpressureDiagnostics,
     pub otlp: OtlpExportDiagnostics,
     pub outputs: Vec<PathBuf>,
     pub warnings: Vec<String>,

@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fs::File,
     os::fd::{AsRawFd, FromRawFd},
     sync::atomic::{Ordering, fence},
@@ -10,7 +10,6 @@ use anyhow::{Context, Result, bail};
 use memmap2::{MmapMut, MmapOptions};
 use perf_event_open_sys::{bindings as perf, ioctls, perf_event_open};
 
-use super::lifecycle::LifecycleNotifier;
 use crate::{
     config::{DEFAULT_MAX_FRAMES, DEFAULT_STACK_BYTES, UnwindMode},
     maps::ExecutableRanges,
@@ -30,6 +29,7 @@ pub enum PerfSampleData {
 
 #[derive(Debug)]
 pub struct PerfSample {
+    pub pid: u32,
     pub tid: u32,
     pub time: u64,
     pub period: u64,
@@ -145,7 +145,6 @@ pub fn probe_access(pid: i32) -> Result<()> {
         .into_iter()
         .next()
         .context("target has no threads")?;
-    LifecycleNotifier::probe_load(pid)?;
     let mut attribute = perf::perf_event_attr {
         size: std::mem::size_of::<perf::perf_event_attr>() as u32,
         type_: perf::PERF_TYPE_SOFTWARE,
@@ -194,6 +193,10 @@ impl PerfCollector {
 
     pub fn reconcile_threads(&mut self) -> Result<()> {
         let threads = read_threads(self.pid)?;
+        self.reconcile_thread_ids(&threads)
+    }
+
+    pub fn reconcile_thread_ids(&mut self, threads: &BTreeSet<i32>) -> Result<()> {
         if threads.len() > self.max_threads {
             bail!(
                 "target has {} threads, exceeding the configured maximum of {}",
@@ -214,7 +217,7 @@ impl PerfCollector {
                 self.retired_events.push(event);
             }
         }
-        for tid in threads {
+        for tid in threads.iter().copied() {
             if !self.events.contains_key(&tid) {
                 let event = match PerfEvent::open(tid, self.mode, self.frequency) {
                     Ok(event) => event,
@@ -343,6 +346,8 @@ impl PerfEvent {
         attribute.set_exclude_kernel(1);
         attribute.set_exclude_hv(1);
         attribute.set_exclude_callchain_kernel(1);
+        attribute.set_use_clockid(1);
+        attribute.clockid = libc::CLOCK_MONOTONIC;
 
         // SAFETY: attribute is zero-initialized and populated according to perf_event_open(2).
         let fd = unsafe {
@@ -568,7 +573,7 @@ fn parse_sample(
 ) -> Option<PerfSample> {
     let mut cursor = Cursor::new(bytes);
     let ip = cursor.u64()?;
-    let _pid = cursor.u32()?;
+    let pid = cursor.u32()?;
     let tid = cursor.u32()?;
     let time = cursor.u64()?;
     let period = cursor.u64()?;
@@ -607,6 +612,7 @@ fn parse_sample(
         UnwindMode::Auto => return None,
     };
     Some(PerfSample {
+        pid,
         tid,
         time,
         period,

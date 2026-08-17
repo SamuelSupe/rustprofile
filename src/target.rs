@@ -92,6 +92,35 @@ impl TargetResolver {
         !matches!(self.identity, LogicalIdentity::Process { .. })
     }
 
+    pub fn cgroup_path(&self) -> Result<Option<PathBuf>> {
+        if matches!(self.identity, LogicalIdentity::Process { .. }) {
+            return Ok(None);
+        }
+        let contents = fs::read_to_string(format!("/proc/{}/cgroup", self.last.pid))
+            .context("failed to read target cgroup membership")?;
+        if let Some(path) = contents.lines().find_map(|line| {
+            let mut fields = line.splitn(3, ':');
+            let hierarchy = fields.next()?;
+            let controllers = fields.next()?;
+            let path = fields.next()?;
+            (hierarchy == "0" && controllers.is_empty()).then_some(path)
+        }) {
+            return Ok(Some(
+                Path::new("/sys/fs/cgroup").join(path.trim_start_matches('/')),
+            ));
+        }
+        Ok(contents.lines().find_map(|line| {
+            let mut fields = line.splitn(3, ':');
+            let _ = fields.next()?;
+            let controllers = fields.next()?;
+            let path = fields.next()?;
+            controllers
+                .split(',')
+                .any(|item| item == "perf_event")
+                .then(|| Path::new("/sys/fs/cgroup/perf_event").join(path.trim_start_matches('/')))
+        }))
+    }
+
     pub fn validate_current(&self) -> Result<()> {
         let current = process_start_time(self.last.pid)?;
         if current != self.last.metadata.process_start_time_ticks {

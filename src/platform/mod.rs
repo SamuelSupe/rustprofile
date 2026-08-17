@@ -12,5 +12,5 @@ pub fn run(cli: Cli) -> Result<()> {
 
 #[cfg(not(target_os = "linux"))]
 pub fn run(_cli: Cli) -> Result<()> {
-    anyhow::bail!("rustprofile only supports Linux 5.8 or newer")
+    anyhow::bail!("rustprofile only supports Linux 5.4 or newer")
 }

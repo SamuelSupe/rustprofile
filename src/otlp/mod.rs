@@ -185,6 +185,7 @@ struct FileIdentity {
 
 pub fn encode_profiles(
     sources: &[&pprof_proto::Profile],
+    timeline: Option<(&pprof_proto::Profile, &[u64])>,
     target: &TargetMetadata,
     executable: &Path,
     config: &OtlpConfig,
@@ -194,7 +195,18 @@ pub fn encode_profiles(
     let mut scope_profiles = Vec::new();
     let mut count = 0_u32;
 
-    for source in sources {
+    let mut inputs = sources
+        .iter()
+        .map(|source| (*source, None))
+        .collect::<Vec<_>>();
+    if let Some((profile, timestamps)) = timeline {
+        inputs.push((profile, Some(timestamps)));
+    }
+
+    for (source, timestamps) in inputs {
+        if timestamps.is_some_and(|timestamps| timestamps.len() != source.sample.len()) {
+            bail!("OTLP timeline timestamps do not match the profile sample count");
+        }
         let lookup = SourceLookup::new(source);
         let stack_indices = source
             .sample
@@ -215,6 +227,7 @@ pub fn encode_profiles(
                 source,
                 sample_index,
                 &stack_indices,
+                timestamps,
                 &mut dictionary,
             )?);
             count = count.saturating_add(1);
@@ -268,6 +281,7 @@ fn convert_profile(
     source: &pprof_proto::Profile,
     sample_index: usize,
     stack_indices: &[i32],
+    timestamps: Option<&[u64]>,
     dictionary: &mut DictionaryBuilder,
 ) -> Result<Profile> {
     let sample_type = source
@@ -282,15 +296,46 @@ fn convert_profile(
         type_strindex: dictionary.intern_string(pprof_string(source, value.r#type)),
         unit_strindex: dictionary.intern_string(pprof_string(source, value.unit)),
     });
-    let mut samples = Vec::with_capacity(source.sample.len());
-    for (sample, stack_index) in source.sample.iter().zip(stack_indices.iter().copied()) {
-        samples.push(Sample {
-            stack_index,
-            attribute_indices: Vec::new(),
-            link_index: 0,
-            values: vec![sample.value.get(sample_index).copied().unwrap_or_default()],
-            timestamps_unix_nano: Vec::new(),
-        });
+    let mut samples = Vec::<Sample>::with_capacity(source.sample.len());
+    let mut grouped = HashMap::<(i32, Vec<i32>, i32), usize>::new();
+    for (source_index, (sample, stack_index)) in source
+        .sample
+        .iter()
+        .zip(stack_indices.iter().copied())
+        .enumerate()
+    {
+        let attribute_indices = sample
+            .label
+            .iter()
+            .filter_map(|label| dictionary.intern_pprof_label(source, label))
+            .collect::<Vec<_>>();
+        let value = sample.value.get(sample_index).copied().unwrap_or_default();
+        if let Some(timestamps) = timestamps {
+            let key = (stack_index, attribute_indices.clone(), 0);
+            if let Some(index) = grouped.get(&key).copied() {
+                samples[index].values.push(value);
+                samples[index]
+                    .timestamps_unix_nano
+                    .push(timestamps[source_index]);
+            } else {
+                grouped.insert(key, samples.len());
+                samples.push(Sample {
+                    stack_index,
+                    attribute_indices,
+                    link_index: 0,
+                    values: vec![value],
+                    timestamps_unix_nano: vec![timestamps[source_index]],
+                });
+            }
+        } else {
+            samples.push(Sample {
+                stack_index,
+                attribute_indices,
+                link_index: 0,
+                values: vec![value],
+                timestamps_unix_nano: Vec::new(),
+            });
+        }
     }
     Ok(Profile {
         sample_type: Some(sample_type),
@@ -421,6 +466,40 @@ impl<'a> DictionaryBuilder<'a> {
         index
     }
 
+    fn intern_attribute_i64(&mut self, key: &str, value: i64, unit: &str) -> i32 {
+        let cache_key = (key.to_owned(), format!("i:{value}:{unit}"));
+        if let Some(index) = self.attribute_index.get(&cache_key) {
+            return *index;
+        }
+        let entry = KeyValueAndUnit {
+            key_strindex: self.intern_string(key),
+            value: Some(AnyValue {
+                value: Some(any_value::Value::IntValue(value)),
+            }),
+            unit_strindex: self.intern_string(unit),
+        };
+        let index = self.attributes.len() as i32;
+        self.attributes.push(entry);
+        self.attribute_index.insert(cache_key, index);
+        index
+    }
+
+    fn intern_pprof_label(
+        &mut self,
+        source: &pprof_proto::Profile,
+        label: &pprof_proto::Label,
+    ) -> Option<i32> {
+        let key = pprof_string(source, label.key);
+        if key.is_empty() {
+            return None;
+        }
+        if label.str != 0 {
+            Some(self.intern_attribute_string(key, pprof_string(source, label.str).to_owned()))
+        } else {
+            Some(self.intern_attribute_i64(key, label.num, pprof_string(source, label.num_unit)))
+        }
+    }
+
     fn intern_mapping(
         &mut self,
         source: &pprof_proto::Profile,
@@ -451,9 +530,6 @@ impl<'a> DictionaryBuilder<'a> {
         ) {
             attributes
                 .push(self.intern_attribute_string("process.executable.build_id.htlhash", hash));
-        }
-        if attributes.is_empty() {
-            return 0;
         }
         attributes
             .push(self.intern_attribute_bool("pprof.mapping.has_functions", mapping.has_functions));

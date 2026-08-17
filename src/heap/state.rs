@@ -124,12 +124,12 @@ impl HeapState {
         if event.pointer == 0 || event.size == 0 || event.weight == 0 {
             return;
         }
-        let stack = self.intern_stack(Stack(
+        let stack = self.intern_stack(Stack::from(
             event
                 .frames
                 .into_iter()
                 .map(|address| Frame { address })
-                .collect(),
+                .collect::<Vec<_>>(),
         ));
         let alloc_objects = saturating_i64(event.weight);
         let weighted_space = event.size.saturating_mul(event.weight);

@@ -26,8 +26,17 @@ fn main() {
         .build()
         .expect("failed to build lifecycle eBPF program");
 
+    let mut off_cpu = libbpf_cargo::SkeletonBuilder::new();
+    off_cpu
+        .source("bpf/off_cpu.bpf.c")
+        .obj(out.join("off_cpu.bpf.o"))
+        .clang_args([target, system_include, "-Ibpf/include"])
+        .build()
+        .expect("failed to build off-CPU eBPF program");
+
     println!("cargo:rerun-if-changed=bpf/heap.bpf.c");
     println!("cargo:rerun-if-changed=bpf/lifecycle.bpf.c");
+    println!("cargo:rerun-if-changed=bpf/off_cpu.bpf.c");
     println!("cargo:rerun-if-changed=bpf/include");
 }
 

@@ -111,6 +111,244 @@ fn otlp_compression_is_a_closed_cli_enum() {
 }
 
 #[test]
+fn help_lists_continuous_collection_and_offline_workflows() {
+    for (command, expected) in [
+        (
+            ["record", "--help"].as_slice(),
+            [
+                "off-cpu",
+                "max-pending-events",
+                "event-reorder-window",
+                "max-timeline-samples",
+                "otlp-timeline",
+                "firefox-profile",
+            ]
+            .as_slice(),
+        ),
+        (
+            ["launch", "--help"].as_slice(),
+            [
+                "suspended",
+                "firefox-profile",
+                "max-pending-events",
+                "otlp-timeline",
+            ]
+            .as_slice(),
+        ),
+        (
+            ["import", "--help"].as_slice(),
+            [
+                "--input",
+                "perf-data",
+                "max-timeline-samples",
+                "firefox-profile",
+            ]
+            .as_slice(),
+        ),
+        (
+            ["serve", "--help"].as_slice(),
+            [
+                "--profile",
+                "--directory",
+                "--bearer-token",
+                "--cors-origin",
+                "symbol-dir",
+            ]
+            .as_slice(),
+        ),
+    ] {
+        let output = profiler()
+            .args(command)
+            .output()
+            .expect("rustprofile help should be runnable");
+        assert!(
+            output.status.success(),
+            "help command {command:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let help = String::from_utf8_lossy(&output.stdout);
+        for needle in expected {
+            assert!(
+                help.contains(needle),
+                "help command {command:?} omitted {needle:?}: {help}"
+            );
+        }
+    }
+}
+
+#[test]
+fn record_rejects_zero_pending_event_budget() {
+    assert_rejected(
+        &["record", "--pid", "1", "--max-pending-events", "0"],
+        "value must be greater than zero",
+    );
+}
+
+#[test]
+fn record_rejects_zero_timeline_sample_budget() {
+    assert_rejected(
+        &["record", "--pid", "1", "--max-timeline-samples", "0"],
+        "value must be greater than zero",
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn record_rejects_otlp_timeline_without_endpoint_before_target_access() {
+    let output = profiler()
+        .env_remove("OTEL_EXPORTER_OTLP_PROFILES_ENDPOINT")
+        .env_remove("OTEL_EXPORTER_OTLP_ENDPOINT")
+        .args([
+            "record",
+            "--pid",
+            "1",
+            "--profiles",
+            "cpu",
+            "--otlp-timeline",
+        ])
+        .output()
+        .expect("rustprofile binary should be runnable");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("tracefs is not mounted") {
+        eprintln!("skipping OTLP timeline assertion because tracefs is unavailable: {stderr}");
+        return;
+    }
+    assert!(
+        stderr.contains("--otlp-timeline requires an OTLP endpoint"),
+        "stderr did not explain the missing OTLP endpoint: {stderr}"
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn record_rejects_otlp_timeline_without_cpu_profile_before_target_access() {
+    let output = profiler()
+        .args([
+            "record",
+            "--pid",
+            "1",
+            "--profiles",
+            "heap",
+            "--otlp-timeline",
+            "--otlp-endpoint",
+            "http://127.0.0.1:4318/v1development/profiles",
+        ])
+        .output()
+        .expect("rustprofile binary should be runnable");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("tracefs is not mounted") {
+        eprintln!("skipping OTLP timeline assertion because tracefs is unavailable: {stderr}");
+        return;
+    }
+    assert!(
+        stderr.contains("--otlp-timeline requires --profiles cpu"),
+        "stderr did not explain the missing CPU profile: {stderr}"
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn launch_rejects_otlp_timeline_before_spawning_target() {
+    let output = profiler()
+        .env_remove("OTEL_EXPORTER_OTLP_PROFILES_ENDPOINT")
+        .env_remove("OTEL_EXPORTER_OTLP_ENDPOINT")
+        .args(["launch", "--otlp-timeline", "--", "/bin/sh", "-c", "exit 0"])
+        .output()
+        .expect("rustprofile binary should be runnable");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("tracefs is not mounted") {
+        eprintln!("skipping OTLP timeline assertion because tracefs is unavailable: {stderr}");
+        return;
+    }
+    assert!(
+        stderr.contains("--otlp-timeline requires an OTLP endpoint"),
+        "launch should validate OTLP timeline before spawning its target: {stderr}"
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn launch_rejects_otlp_timeline_without_cpu_profile_before_spawning_target() {
+    let output = profiler()
+        .args([
+            "launch",
+            "--profiles",
+            "heap",
+            "--otlp-timeline",
+            "--otlp-endpoint",
+            "http://127.0.0.1:4318/v1development/profiles",
+            "--",
+            "/bin/sh",
+            "-c",
+            "exit 0",
+        ])
+        .output()
+        .expect("rustprofile binary should be runnable");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("tracefs is not mounted") {
+        eprintln!("skipping OTLP timeline assertion because tracefs is unavailable: {stderr}");
+        return;
+    }
+    assert!(
+        stderr.contains("--otlp-timeline requires --profiles cpu"),
+        "launch should validate CPU selection before spawning its target: {stderr}"
+    );
+}
+
+#[test]
+fn import_rejects_zero_timeline_sample_budget() {
+    assert_rejected(
+        &[
+            "import",
+            "--input",
+            "perf.data",
+            "--max-timeline-samples",
+            "0",
+        ],
+        "value must be greater than zero",
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn serve_requires_exactly_one_profile_source() {
+    assert_rejected(&["serve"], "--profile");
+    assert_rejected(
+        &[
+            "serve",
+            "--profile",
+            "profile.json.gz",
+            "--directory",
+            "profiles",
+        ],
+        "cannot be used",
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn record_rejects_reorder_window_larger_than_output_window() {
+    assert_rejected(
+        &[
+            "record",
+            "--pid",
+            "1",
+            "--profiles",
+            "cpu",
+            "--window",
+            "100ms",
+            "--event-reorder-window",
+            "200ms",
+        ],
+        "--event-reorder-window must not exceed --window",
+    );
+}
+
+#[test]
 #[cfg(target_os = "linux")]
 fn unsupported_otlp_protocol_is_rejected_before_target_access() {
     let output = profiler()
@@ -157,6 +395,8 @@ fn invalid_otlp_timeout_environment_is_rejected_explicitly() {
             "--duration",
             "1ms",
             "--window",
+            "1ms",
+            "--event-reorder-window",
             "1ms",
             "--unwind",
             "fp",

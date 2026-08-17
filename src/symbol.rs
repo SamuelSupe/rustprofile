@@ -19,12 +19,16 @@ use crate::{
 const RESOLVED_CACHE_CAPACITY: usize = 65_536;
 const DEBUGINFOD_BUDGET: Duration = Duration::from_secs(30);
 const MAX_DEBUGINFO_BYTES: u64 = 512 * 1024 * 1024;
+const JIT_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+const MAX_JITDUMP_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_PERF_MAP_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct MappingInfo {
     pub start: u64,
     pub limit: u64,
     pub offset: u64,
+    pub relative_address_at_start: u32,
     pub filename: PathBuf,
     pub build_id: Option<String>,
 }
@@ -59,6 +63,13 @@ struct ModuleSymbols {
     external: Option<Loader>,
 }
 
+#[derive(Clone)]
+struct JitSymbol {
+    start: u64,
+    end: u64,
+    name: String,
+}
+
 #[derive(Clone, Copy)]
 struct ModuleRange {
     start: u64,
@@ -73,6 +84,14 @@ pub struct Symbolizer {
     resolved: HashMap<u64, Arc<ResolvedLocation>>,
     resolved_order: VecDeque<u64>,
     _remote_cache: Option<tempfile::TempDir>,
+    perf_map_path: Option<PathBuf>,
+    perf_map_modified: Option<std::time::SystemTime>,
+    perf_map_checked: Instant,
+    jit_symbols: Vec<JitSymbol>,
+    jitdump_dir: PathBuf,
+    jitdump_pid: i32,
+    jitdump_fingerprint: Vec<(PathBuf, u64, std::time::SystemTime)>,
+    jitdump_symbols: Vec<JitSymbol>,
 }
 
 impl Symbolizer {
@@ -177,12 +196,26 @@ impl Symbolizer {
             .collect::<Vec<_>>();
         ranges.sort_unstable_by_key(|range| range.start);
 
+        let namespace_pid = namespace_pid(pid);
+        let perf_map_path = perf_map_path(pid, namespace_pid);
+        let (perf_map_modified, jit_symbols) = load_perf_map(&perf_map_path);
+        let jitdump_dir = PathBuf::from(format!("/proc/{pid}/root/tmp"));
+        let jitdump_fingerprint = jitdump_fingerprint(&jitdump_dir, namespace_pid);
+        let jitdump_symbols = load_jitdump_symbols(&jitdump_fingerprint);
         Ok(Self {
             modules,
             ranges,
             resolved: HashMap::new(),
             resolved_order: VecDeque::new(),
             _remote_cache: remote_cache,
+            perf_map_path: Some(perf_map_path),
+            perf_map_modified,
+            perf_map_checked: Instant::now(),
+            jit_symbols,
+            jitdump_dir,
+            jitdump_pid: namespace_pid,
+            jitdump_fingerprint,
+            jitdump_symbols,
         })
     }
 
@@ -201,7 +234,59 @@ impl Symbolizer {
         resolved
     }
 
+    pub fn refresh_dynamic_symbols(&mut self) {
+        self.refresh_perf_map();
+    }
+
+    pub fn mapping_for_address(&mut self, address: u64) -> Option<MappingInfo> {
+        if let Some(symbol) = find_jit_symbol(&self.jitdump_symbols, address) {
+            return jit_mapping_info(symbol, "[jit:jitdump]");
+        }
+        if let Some(symbol) = find_jit_symbol(&self.jit_symbols, address) {
+            return jit_mapping_info(symbol, "[jit:perf-map]");
+        }
+        let index = self
+            .ranges
+            .partition_point(|mapping| mapping.start <= address);
+        let range = index
+            .checked_sub(1)
+            .and_then(|index| self.ranges.get(index))
+            .filter(|mapping| address < mapping.end)?;
+        let module = &self.modules[range.module];
+        let mapping = &module.mappings[range.mapping];
+        Some(MappingInfo {
+            start: mapping.start,
+            limit: mapping.end,
+            offset: mapping.offset,
+            relative_address_at_start: u32::try_from(
+                mapping.start.saturating_sub(module.load_bias),
+            )
+            .unwrap_or_default(),
+            filename: module.path.clone(),
+            build_id: module.build_id.clone(),
+        })
+    }
+
+    pub fn jit_mapping_count(&self) -> u64 {
+        self.jit_symbols
+            .len()
+            .saturating_add(self.jitdump_symbols.len()) as u64
+    }
+
     fn resolve_uncached(&self, address: u64) -> ResolvedLocation {
+        if let Some(symbol) = find_jit_symbol(&self.jitdump_symbols, address) {
+            return jit_resolved_location(symbol, address, "[jit:jitdump]");
+        }
+        let jit_index = self
+            .jit_symbols
+            .partition_point(|symbol| symbol.start <= address);
+        if let Some(symbol) = jit_index
+            .checked_sub(1)
+            .and_then(|index| self.jit_symbols.get(index))
+            .filter(|symbol| address < symbol.end)
+        {
+            return jit_resolved_location(symbol, address, "[jit:perf-map]");
+        }
         let index = self
             .ranges
             .partition_point(|mapping| mapping.start <= address);
@@ -238,11 +323,230 @@ impl Symbolizer {
                 start: mapping.start,
                 limit: mapping.end,
                 offset: mapping.offset,
+                relative_address_at_start: u32::try_from(
+                    mapping.start.saturating_sub(module.load_bias),
+                )
+                .unwrap_or_default(),
                 filename: module.path.clone(),
                 build_id: module.build_id.clone(),
             }),
             lines,
         }
+    }
+
+    fn refresh_perf_map(&mut self) {
+        if self.perf_map_checked.elapsed() < JIT_REFRESH_INTERVAL {
+            return;
+        }
+        self.perf_map_checked = Instant::now();
+        if let Some(path) = self.perf_map_path.as_deref() {
+            let modified = fs::metadata(path)
+                .and_then(|metadata| metadata.modified())
+                .ok();
+            if modified.is_some() && modified != self.perf_map_modified {
+                let (modified, symbols) = load_perf_map(path);
+                self.perf_map_modified = modified;
+                self.jit_symbols = symbols;
+                self.resolved.clear();
+                self.resolved_order.clear();
+            }
+        }
+        let fingerprint = jitdump_fingerprint(&self.jitdump_dir, self.jitdump_pid);
+        if fingerprint != self.jitdump_fingerprint {
+            let symbols = load_jitdump_symbols(&fingerprint);
+            self.jitdump_fingerprint = fingerprint;
+            self.jitdump_symbols = symbols;
+            self.resolved.clear();
+            self.resolved_order.clear();
+        }
+    }
+}
+
+fn find_jit_symbol(symbols: &[JitSymbol], address: u64) -> Option<&JitSymbol> {
+    let index = symbols.partition_point(|symbol| symbol.start <= address);
+    index
+        .checked_sub(1)
+        .and_then(|index| symbols.get(index))
+        .filter(|symbol| address < symbol.end)
+}
+
+fn jit_resolved_location(symbol: &JitSymbol, address: u64, source: &str) -> ResolvedLocation {
+    ResolvedLocation {
+        address,
+        mapping: Some(MappingInfo {
+            start: symbol.start,
+            limit: symbol.end,
+            offset: 0,
+            relative_address_at_start: 0,
+            filename: PathBuf::from(source),
+            build_id: None,
+        }),
+        lines: vec![SymbolizedLine {
+            function: symbol.name.clone(),
+            system_name: symbol.name.clone(),
+            filename: None,
+            line: 0,
+        }],
+    }
+}
+
+fn jit_mapping_info(symbol: &JitSymbol, source: &str) -> Option<MappingInfo> {
+    Some(MappingInfo {
+        start: symbol.start,
+        limit: symbol.end,
+        offset: 0,
+        relative_address_at_start: 0,
+        filename: PathBuf::from(source),
+        build_id: None,
+    })
+}
+
+fn namespace_pid(pid: i32) -> i32 {
+    let status = fs::read_to_string(format!("/proc/{pid}/status")).ok();
+    status
+        .as_deref()
+        .and_then(|status| status.lines().find(|line| line.starts_with("NSpid:")))
+        .and_then(|line| line.split_ascii_whitespace().last())
+        .and_then(|pid| pid.parse::<i32>().ok())
+        .unwrap_or(pid)
+}
+
+fn perf_map_path(pid: i32, namespace_pid: i32) -> PathBuf {
+    PathBuf::from(format!("/proc/{pid}/root/tmp/perf-{namespace_pid}.map"))
+}
+
+fn load_perf_map(path: &Path) -> (Option<std::time::SystemTime>, Vec<JitSymbol>) {
+    let modified = fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok();
+    let Ok(file) = fs::File::open(path) else {
+        return (modified, Vec::new());
+    };
+    let mut contents = String::new();
+    if file
+        .take(MAX_PERF_MAP_BYTES.saturating_add(1))
+        .read_to_string(&mut contents)
+        .is_err()
+        || contents.len() as u64 > MAX_PERF_MAP_BYTES
+    {
+        return (modified, Vec::new());
+    }
+    let mut symbols = contents
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.splitn(3, ' ');
+            let start = u64::from_str_radix(fields.next()?, 16).ok()?;
+            let size = u64::from_str_radix(fields.next()?, 16).ok()?;
+            let name = fields.next()?.trim();
+            (!name.is_empty() && size != 0).then(|| JitSymbol {
+                start,
+                end: start.saturating_add(size),
+                name: name.to_owned(),
+            })
+        })
+        .collect::<Vec<_>>();
+    symbols.sort_unstable_by_key(|symbol| symbol.start);
+    (modified, symbols)
+}
+
+fn jitdump_fingerprint(
+    directory: &Path,
+    namespace_pid: i32,
+) -> Vec<(PathBuf, u64, std::time::SystemTime)> {
+    let path = directory.join(format!("jit-{namespace_pid}.dump"));
+    let Some((size, modified)) = fs::metadata(&path)
+        .ok()
+        .and_then(|metadata| Some((metadata.len(), metadata.modified().ok()?)))
+    else {
+        return Vec::new();
+    };
+    vec![(path, size, modified)]
+}
+
+fn load_jitdump_symbols(files: &[(PathBuf, u64, std::time::SystemTime)]) -> Vec<JitSymbol> {
+    use linux_perf_data::jitdump::{JitDumpReader, JitDumpRecord};
+
+    let mut by_index = HashMap::<u64, JitSymbol>::new();
+    for (path, size, _) in files {
+        if *size > MAX_JITDUMP_BYTES {
+            continue;
+        }
+        let Ok(file) = fs::File::open(path) else {
+            continue;
+        };
+        let Ok(mut reader) = JitDumpReader::new(file) else {
+            continue;
+        };
+        while by_index.len() < 65_536 {
+            let Ok(Some(raw)) = reader.next_record() else {
+                break;
+            };
+            match raw.parse() {
+                Ok(JitDumpRecord::CodeLoad(record)) => {
+                    let name = String::from_utf8_lossy(&record.function_name.as_slice())
+                        .trim_end_matches('\0')
+                        .to_owned();
+                    by_index.insert(
+                        record.code_index,
+                        JitSymbol {
+                            start: record.code_addr,
+                            end: record
+                                .code_addr
+                                .saturating_add(record.code_bytes.len() as u64),
+                            name,
+                        },
+                    );
+                }
+                Ok(JitDumpRecord::CodeMove(record)) => {
+                    if let Some(symbol) = by_index.get_mut(&record.code_index) {
+                        symbol.start = record.new_code_addr;
+                        symbol.end = record.new_code_addr.saturating_add(record.code_size);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut symbols = by_index.into_values().collect::<Vec<_>>();
+    symbols.sort_unstable_by_key(|symbol| symbol.start);
+    symbols
+}
+
+pub fn jit_artifact_counts(pid: i32) -> (u64, u64) {
+    let namespace_pid = namespace_pid(pid);
+    let perf_maps = perf_map_path(pid, namespace_pid).is_file().into();
+    let jitdump_files = PathBuf::from(format!("/proc/{pid}/root/tmp/jit-{namespace_pid}.dump"))
+        .is_file()
+        .into();
+    (perf_maps, jitdump_files)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
+    use super::jitdump_fingerprint;
+
+    #[test]
+    fn jitdump_fingerprint_selects_only_the_namespace_pid_file() {
+        let directory = tempdir().expect("jitdump fixture directory");
+        for name in [
+            "jit-123.dump",
+            "jit-124.dump",
+            "jit-123.dump.tmp",
+            "not-a-jitdump.dump",
+        ] {
+            fs::write(directory.path().join(name), b"fixture").expect("write jitdump fixture");
+        }
+
+        let files = jitdump_fingerprint(directory.path(), 123);
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            files[0].0.file_name().and_then(|name| name.to_str()),
+            Some("jit-123.dump")
+        );
     }
 }
 

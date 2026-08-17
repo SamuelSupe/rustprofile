@@ -1,6 +1,7 @@
 mod cli;
 mod config;
 mod diagnostics;
+mod firefox;
 mod maps;
 mod otlp;
 mod platform;
@@ -17,10 +18,10 @@ pub mod heap;
 use anyhow::Result;
 use clap::Parser;
 
-pub use config::{AllocatorChoice, ProfileKind, UnwindMode};
+pub use config::{AllocatorChoice, FirefoxProfileFormat, ProfileKind, UnwindMode};
 pub use diagnostics::{
-    CheckReport, OtlpExportDiagnostics, OtlpExportStatus, TargetKind, TargetMetadata,
-    WindowDiagnostics,
+    CapabilityReport, CheckReport, OtlpExportDiagnostics, OtlpExportStatus, TargetKind,
+    TargetMetadata, WindowDiagnostics,
 };
 
 pub fn run() -> Result<()> {

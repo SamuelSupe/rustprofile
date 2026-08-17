@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>rustprofile flame graph</title>
+<style>
+:root{color-scheme:light;--ink:#172033;--muted:#64748b;--line:#dbe2ea;--blue:#1769e0;--blue2:#2e82f2;--blue3:#6ba8f7;--soft:#f4f7fb;--orange:#f59e0b}
+*{box-sizing:border-box}body{margin:0;background:#fff;color:var(--ink);font:13px/1.45 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,select,input{font:inherit;color:inherit}button,select,input[type=search]{height:34px;border:1px solid var(--line);background:#fff;border-radius:6px;padding:0 10px}button{cursor:pointer}button:hover{border-color:#94a3b8}.shell{min-height:100vh;display:flex;flex-direction:column}.top{height:58px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;padding:0 18px;position:sticky;top:0;background:#fff;z-index:10}.brand{font-weight:750;font-size:15px;margin-right:14px;white-space:nowrap}.brand i{display:inline-block;width:10px;height:10px;background:var(--blue);margin-right:8px;border-radius:2px}.field{display:flex;align-items:center;gap:6px}.field label{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em}.field select{min-width:150px}.search{margin-left:auto;width:min(270px,25vw)}.main{padding:18px;flex:1;min-width:0}.summary{display:flex;align-items:center;border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:14px;gap:0}.metric{padding:0 24px;border-left:1px solid var(--line)}.metric:first-child{padding-left:0;border-left:0}.metric span{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em}.metric strong{font-size:18px;font-variant-numeric:tabular-nums}.pill{margin-left:auto;background:#eaf2ff;color:#1456b8;padding:5px 9px;border-radius:999px;font-weight:650}.timeline{border-bottom:1px solid var(--line);padding-bottom:16px}.section-head{height:30px;display:flex;align-items:center}.section-head h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;margin:0}.section-head span{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums}.overview{height:78px;border:1px solid var(--line);background:var(--soft);position:relative;overflow:hidden}.overview svg{width:100%;height:100%;display:block}.range{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:7px}.range label{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:11px}.range input{width:100%;accent-color:var(--blue)}.workspace{display:grid;grid-template-columns:minmax(0,1fr) 330px;min-height:470px}.flame-pane{min-width:0;padding-right:16px;border-right:1px solid var(--line)}.flame-tools{display:flex;align-items:center;gap:8px}.flame-tools button{height:28px;font-size:12px}.flame-wrap{height:440px;overflow:auto;border:1px solid var(--line);background:#fbfdff;position:relative}.flame-wrap svg{display:block;min-width:100%;font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.frame{cursor:pointer;stroke:#fff;stroke-width:.7}.frame:hover{stroke:#172033;stroke-width:1.2}.frame-label{pointer-events:none;fill:#fff;font-size:11px}.hotspots{padding-left:16px;min-width:0}.hotspots table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}.hotspots th{text-align:right;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--line);padding:7px 5px}.hotspots th:first-child,.hotspots td:first-child{text-align:left}.hotspots td{padding:7px 5px;border-bottom:1px solid #eef2f6;text-align:right}.hotspots td:first-child{max-width:185px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.empty{display:grid;place-items:center;height:100%;color:var(--muted);text-align:center;padding:40px}.status{height:30px;border-top:1px solid var(--line);display:flex;align-items:center;padding:0 18px;color:var(--muted);font-size:11px}.status strong{color:#138a52;margin-right:6px}.status .right{margin-left:auto}.tooltip{position:fixed;z-index:20;pointer-events:none;background:#101827;color:#fff;padding:7px 9px;border-radius:5px;max-width:420px;display:none;box-shadow:0 4px 18px #0003}.error{color:#b42318}.loading{opacity:.55;pointer-events:none}
+@media(max-width:900px){.top{height:auto;min-height:58px;flex-wrap:wrap;padding:10px}.search{margin-left:0;width:100%}.main{padding:12px}.workspace{grid-template-columns:1fr}.flame-pane{padding-right:0;border-right:0}.hotspots{padding-left:0;margin-top:16px}.summary{overflow:auto}.metric{padding:0 14px}.field select{min-width:110px}}
+</style>
+</head>
+<body>
+<div class="shell" id="app">
+  <header class="top">
+    <div class="brand"><i></i>rustprofile</div>
+    <div class="field"><label for="session">Session</label><select id="session"></select></div>
+    <div class="field"><label for="window">Window</label><select id="window"></select></div>
+    <div class="field"><label for="thread">Thread</label><select id="thread"></select></div>
+    <input class="search" id="search" type="search" placeholder="Search frames…" autocomplete="off">
+    <button id="refresh" title="Rescan the output directory">Refresh</button>
+  </header>
+  <main class="main">
+    <section class="summary">
+      <div class="metric"><span>Duration</span><strong id="duration">—</strong></div>
+      <div class="metric"><span>Samples</span><strong id="samples">—</strong></div>
+      <div class="metric"><span>Dropped</span><strong id="dropped">—</strong></div>
+      <div class="metric"><span>CPU time</span><strong id="cpu">—</strong></div>
+      <div class="pill" id="format">waiting</div>
+    </section>
+    <section class="timeline">
+      <div class="section-head"><h2>Sample timeline</h2><span id="selection">—</span></div>
+      <div class="overview"><svg id="overview" preserveAspectRatio="none"></svg></div>
+      <div class="range">
+        <label>Start <input id="rangeStart" type="range" min="0" max="1000" value="0"></label>
+        <label>End <input id="rangeEnd" type="range" min="0" max="1000" value="1000"></label>
+      </div>
+    </section>
+    <section class="workspace">
+      <div class="flame-pane">
+        <div class="section-head"><h2>CPU flame graph</h2><div class="flame-tools" style="margin-left:auto"><button id="resetZoom">Reset zoom</button></div></div>
+        <div class="flame-wrap" id="flameWrap"><div class="empty">Choose a recorded window to render its stacks.</div></div>
+      </div>
+      <aside class="hotspots">
+        <div class="section-head"><h2>Hot functions</h2><span>selected range</span></div>
+        <table><thead><tr><th>Function</th><th>Total</th><th>Self</th></tr></thead><tbody id="hotspots"></tbody></table>
+      </aside>
+    </section>
+  </main>
+  <footer class="status"><strong id="health">● Ready</strong><span id="status">No profile loaded</span><span class="right" id="file"></span></footer>
+</div>
+<div class="tooltip" id="tooltip"></div>
+<script>
+const $=id=>document.getElementById(id);
+const state={entries:[],profile:null,session:'',entryId:'',thread:'all',rangeStart:0,rangeEnd:1,zoom:null,tree:null};
+const MAX_TREE_NODES=50000,MAX_RENDERED_FRAMES=20000;
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=n=>new Intl.NumberFormat().format(n||0);
+const ms=n=>n>=1000?(n/1000).toFixed(2)+' s':n.toFixed(1)+' ms';
+
+async function json(url){const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw new Error((await r.text())||`${r.status} ${r.statusText}`);return r.json()}
+function busy(on){$('app').classList.toggle('loading',on)}
+function message(text,error=false){$('status').textContent=text;$('health').textContent=error?'● Error':'● Ready';$('health').classList.toggle('error',error)}
+
+async function loadManifest(keep=true){
+  busy(true);message('Scanning profile windows…');
+  try{
+    state.entries=await json('/api/profiles');
+    const sessions=[...new Set(state.entries.map(e=>e.session))];
+    if(!keep||!sessions.includes(state.session))state.session=sessions[0]||'';
+    $('session').innerHTML=sessions.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+    $('session').value=state.session;fillWindows(keep);
+    if(state.entryId)await loadProfile(state.entryId);else showEmpty('No Firefox .json.gz or .jslb.gz windows were found.');
+  }catch(e){showEmpty(e.message,true)}finally{busy(false)}
+}
+function fillWindows(keep){
+  const list=state.entries.filter(e=>e.session===state.session);
+  if(!keep||!list.some(e=>e.id===state.entryId))state.entryId=list[0]?.id||'';
+  $('window').innerHTML=list.map(e=>`<option value="${e.id}">#${String(e.window_index??'?').padStart(6,'0')} · ${new Date(Number(e.started_unix_nanos||0)/1e6).toLocaleTimeString()}</option>`).join('');
+  $('window').value=state.entryId;
+}
+async function loadProfile(id){
+  if(!id)return;busy(true);message('Decoding profile…');
+  try{
+    state.profile=await json('/api/profile/'+encodeURIComponent(id));state.entryId=id;state.thread='all';state.rangeStart=0;state.rangeEnd=1;state.zoom=null;
+    fillThreads();render();message(`Loaded ${fmt(state.profile.sample_count)} samples${state.profile.truncated?' (viewer limit reached)':''}`);$('file').textContent=state.profile.profile.filename;
+  }catch(e){showEmpty(e.message,true)}finally{busy(false)}
+}
+function fillThreads(){
+  const p=state.profile;$('thread').innerHTML='<option value="all">All threads</option>'+p.threads.map((t,i)=>`<option value="${i}">${esc(t.name)} · ${esc(t.tid)}</option>`).join('');$('thread').value=state.thread;
+}
+function chosenThreads(){return state.thread==='all'?state.profile.threads:[state.profile.threads[Number(state.thread)]].filter(Boolean)}
+function bounds(){
+  let lo=Infinity,hi=-Infinity;for(const t of chosenThreads())for(const x of t.times_millis){lo=Math.min(lo,x);hi=Math.max(hi,x)}
+  return Number.isFinite(lo)?[lo,Math.max(lo+.0001,hi)]:[0,1];
+}
+function selectedBounds(){const [lo,hi]=bounds(),span=hi-lo;return[lo+span*state.rangeStart,lo+span*state.rangeEnd]}
+function buildTree(){
+  const root={name:'All samples',total:0,self:0,children:new Map(),depth:0};const [from,to]=selectedBounds();let count=0,cpu=0,nodeCount=1,treeTruncated=false;
+  for(const thread of chosenThreads())for(let i=0;i<thread.times_millis.length;i++){
+    const time=thread.times_millis[i];if(time<from||time>to)continue;const si=thread.stack_indices[i],weight=Math.max(0,thread.weights[i]||0);if(si==null||!state.profile.stacks[si])continue;
+    root.total+=weight;count++;cpu+=thread.cpu_delta_micros[i]||0;let node=root;
+    for(const fi of state.profile.stacks[si]){const name=state.profile.functions[fi]||'<unknown>';if(!node.children.has(name)){if(nodeCount>=MAX_TREE_NODES){treeTruncated=true;break}node.children.set(name,{name,total:0,self:0,children:new Map(),depth:node.depth+1});nodeCount++}node=node.children.get(name);node.total+=weight}
+    node.self+=weight;
+  }
+  return{root,count,cpu,from,to,treeTruncated};
+}
+function render(){
+  if(!state.profile)return;const built=buildTree();state.tree=built.root;state.zoom=null;
+  $('samples').textContent=fmt(built.count);$('dropped').textContent=fmt(state.profile.profile.dropped_samples||0);$('cpu').textContent=ms(built.cpu/1000);$('duration').textContent=ms(built.to-built.from);$('format').textContent=state.profile.profile.format.toUpperCase()+(state.profile.truncated?' · samples limited':'')+(built.treeTruncated?' · frames limited':'');$('selection').textContent=`${built.from.toFixed(1)} – ${built.to.toFixed(1)} ms`;
+  drawOverview();drawFlame(built.root);drawHotspots(built.root);
+}
+function drawOverview(){
+  const svg=$('overview'),[lo,hi]=bounds(),bins=new Array(160).fill(0),span=hi-lo||1;
+  for(const t of chosenThreads())for(const x of t.times_millis)bins[Math.min(159,Math.floor((x-lo)/span*160))]++;
+  const max=Math.max(1,...bins),w=1000,h=76;let bars='';bins.forEach((v,i)=>{const bh=v/max*62;bars+=`<rect x="${i*w/160}" y="${h-bh}" width="${w/160+0.2}" height="${bh}" fill="#6ba8f7"/>`});
+  const x1=state.rangeStart*w,x2=state.rangeEnd*w;svg.setAttribute('viewBox',`0 0 ${w} ${h}`);svg.innerHTML=bars+`<rect x="0" y="0" width="${x1}" height="${h}" fill="#fff" opacity=".72"/><rect x="${x2}" y="0" width="${w-x2}" height="${h}" fill="#fff" opacity=".72"/><line x1="${x1}" x2="${x1}" y1="0" y2="${h}" stroke="#1769e0" stroke-width="2"/><line x1="${x2}" x2="${x2}" y1="0" y2="${h}" stroke="#1769e0" stroke-width="2"/>`;
+}
+function drawFlame(root){state.zoom=root;drawZoom()}
+function drawZoom(){
+  const root=state.zoom||state.tree,wrap=$('flameWrap');if(!root||root.total<=0){wrap.innerHTML='<div class="empty">No samples in this range.</div>';return}
+  const width=Math.max(900,wrap.clientWidth-2),row=25;let maxDepth=0,nodes=[];
+  function walk(node,x,y,w){if(w<.7||nodes.length>=MAX_RENDERED_FRAMES)return;maxDepth=Math.max(maxDepth,y);nodes.push({node,x,y,w});let cursor=x;const children=[...node.children.values()].sort((a,b)=>b.total-a.total);for(const child of children){const cw=w*child.total/root.total;walk(child,cursor,y+1,cw);cursor+=cw}}
+  let cursor=0;for(const child of [...root.children.values()].sort((a,b)=>b.total-a.total)){const w=width*child.total/root.total;walk(child,cursor,0,w);cursor+=w}
+  const q=$('search').value.trim().toLowerCase();const colors=['#1769e0','#2e82f2','#4c94f4','#6ba8f7'];
+  const body=nodes.map(({node,x,y,w})=>{const match=q&&node.name.toLowerCase().includes(q),fill=match?'#f59e0b':colors[y%colors.length],label=w>34?`<text class="frame-label" x="${x+5}" y="${y*row+17}">${esc(short(node.name,Math.floor(w/7)))}</text>`:'';return`<g data-name="${esc(node.name)}" data-total="${node.total}" data-self="${node.self}"><rect class="frame" x="${x}" y="${y*row}" width="${Math.max(.5,w)}" height="${row-1}" fill="${fill}"/>${label}</g>`}).join('');
+  wrap.innerHTML=`<svg id="flame" viewBox="0 0 ${width} ${(maxDepth+1)*row}" preserveAspectRatio="xMinYMin meet" width="${width}" height="${Math.max(440,(maxDepth+1)*row)}">${body}</svg>`;
+  [...wrap.querySelectorAll('g')].forEach((g,i)=>{const item=nodes[i];g.addEventListener('click',()=>{state.zoom=item.node;drawZoom()});g.addEventListener('mousemove',e=>tip(e,`${esc(item.node.name)}<br>${fmt(item.node.total)} total · ${fmt(item.node.self)} self`));g.addEventListener('mouseleave',hideTip)});
+}
+function short(s,n){return n<3?'':s.length>n?s.slice(0,Math.max(1,n-1))+'…':s}
+function drawHotspots(root){
+  const map=new Map();function walk(n){if(n!==root){const v=map.get(n.name)||{total:0,self:0};v.total+=n.total;v.self+=n.self;map.set(n.name,v)}for(const c of n.children.values())walk(c)}walk(root);
+  $('hotspots').innerHTML=[...map].sort((a,b)=>b[1].total-a[1].total).slice(0,24).map(([name,v])=>`<tr title="${esc(name)}"><td>${esc(name)}</td><td>${fmt(v.total)}</td><td>${fmt(v.self)}</td></tr>`).join('');
+}
+function tip(e,html){const t=$('tooltip');t.innerHTML=html;t.style.display='block';t.style.left=Math.min(innerWidth-430,e.clientX+14)+'px';t.style.top=(e.clientY+14)+'px'}function hideTip(){$('tooltip').style.display='none'}
+function showEmpty(text,error=false){state.profile=null;$('flameWrap').innerHTML=`<div class="empty ${error?'error':''}">${esc(text)}</div>`;$('hotspots').innerHTML='';message(text,error);$('file').textContent='';['duration','samples','dropped','cpu'].forEach(id=>$(id).textContent='—');$('format').textContent='empty'}
+
+$('session').addEventListener('change',async e=>{state.session=e.target.value;fillWindows(false);await loadProfile(state.entryId)});
+$('window').addEventListener('change',e=>loadProfile(e.target.value));
+$('thread').addEventListener('change',e=>{state.thread=e.target.value;state.rangeStart=0;state.rangeEnd=1;$('rangeStart').value=0;$('rangeEnd').value=1000;render()});
+$('search').addEventListener('input',()=>drawZoom());
+$('refresh').addEventListener('click',()=>loadManifest(true));
+$('resetZoom').addEventListener('click',()=>{state.zoom=state.tree;drawZoom()});
+$('rangeStart').addEventListener('input',e=>{state.rangeStart=Math.min(Number(e.target.value)/1000,state.rangeEnd-.001);e.target.value=state.rangeStart*1000;render()});
+$('rangeEnd').addEventListener('input',e=>{state.rangeEnd=Math.max(Number(e.target.value)/1000,state.rangeStart+.001);e.target.value=state.rangeEnd*1000;render()});
+addEventListener('resize',()=>state.profile&&drawZoom());
+loadManifest(false);
+</script>
+</body>
+</html>

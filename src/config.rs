@@ -10,6 +10,8 @@ pub const DEFAULT_MAX_FRAMES: usize = 127;
 pub const DEFAULT_STACK_BYTES: usize = 16 * 1024;
 pub const DEFAULT_MAX_THREADS: usize = 1024;
 pub const DEFAULT_MAX_STACKS: usize = 65_536;
+pub const DEFAULT_MAX_PENDING_EVENTS: usize = 262_144;
+pub const DEFAULT_MAX_TIMELINE_SAMPLES: usize = 65_536;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, ValueEnum)]
 #[serde(rename_all = "snake_case")]
@@ -34,6 +36,7 @@ impl fmt::Display for UnwindMode {
 pub enum ProfileKind {
     Cpu,
     Heap,
+    OffCpu,
 }
 
 impl fmt::Display for ProfileKind {
@@ -41,8 +44,16 @@ impl fmt::Display for ProfileKind {
         formatter.write_str(match self {
             Self::Cpu => "cpu",
             Self::Heap => "heap",
+            Self::OffCpu => "off-cpu",
         })
     }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, ValueEnum)]
+#[serde(rename_all = "snake_case")]
+pub enum FirefoxProfileFormat {
+    Json,
+    Jslb,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, ValueEnum)]
@@ -88,12 +99,32 @@ pub struct KernelVersion {
 impl KernelVersion {
     pub const MINIMUM: Self = Self {
         major: 5,
+        minor: 4,
+        patch: 0,
+    };
+
+    pub const BPF_RING_BUFFER_MINIMUM: Self = Self {
+        major: 5,
         minor: 8,
+        patch: 0,
+    };
+
+    pub const HEAP_MINIMUM: Self = Self {
+        major: 5,
+        minor: 12,
         patch: 0,
     };
 
     pub fn is_supported(self) -> bool {
         self >= Self::MINIMUM
+    }
+
+    pub fn supports_bpf_ring_buffer(self) -> bool {
+        self >= Self::BPF_RING_BUFFER_MINIMUM
+    }
+
+    pub fn supports_heap(self) -> bool {
+        self >= Self::HEAP_MINIMUM
     }
 }
 
@@ -136,4 +167,25 @@ fn parse_version_part(part: Option<&str>, original: &str) -> Result<u32> {
     };
     part.parse::<u32>()
         .with_context(|| format!("invalid kernel release {original:?}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::KernelVersion;
+
+    #[test]
+    fn kernel_capability_boundaries_are_independent() {
+        let linux_5_4 = KernelVersion::from_str("5.4.0-generic").unwrap();
+        assert!(linux_5_4.is_supported());
+        assert!(!linux_5_4.supports_bpf_ring_buffer());
+        assert!(!linux_5_4.supports_heap());
+
+        let linux_5_8 = KernelVersion::from_str("5.8.0").unwrap();
+        assert!(linux_5_8.supports_bpf_ring_buffer());
+        assert!(!linux_5_8.supports_heap());
+
+        assert!(KernelVersion::from_str("5.12.0").unwrap().supports_heap());
+    }
 }

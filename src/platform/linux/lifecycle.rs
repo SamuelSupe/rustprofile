@@ -1,6 +1,9 @@
-use std::sync::{
-    Arc,
-    atomic::{AtomicU8, Ordering},
+use std::{
+    str::FromStr,
+    sync::{
+        Arc,
+        atomic::{AtomicU8, Ordering},
+    },
 };
 
 use anyhow::{Context, Result};
@@ -8,13 +11,16 @@ use libbpf_rs::{
     Link, MapCore, Object, ObjectBuilder, RingBuffer, RingBufferBuilder, TracepointCategory,
 };
 
+use crate::config::KernelVersion;
+
 static LIFECYCLE_BPF: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/lifecycle.bpf.o"));
 
 pub struct LifecycleNotifier {
-    ring: RingBuffer<'static>,
+    ring: Option<RingBuffer<'static>>,
     _links: Vec<Link>,
-    _object: Object,
+    _object: Option<Object>,
     pending: Arc<AtomicU8>,
+    fallback_reason: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -24,12 +30,32 @@ pub struct LifecycleEvents {
 }
 
 impl LifecycleNotifier {
-    pub fn probe_load(pid: i32) -> Result<()> {
+    pub fn probe_load(pid: i32, kernel_release: &str) -> Result<bool> {
+        let version = KernelVersion::from_str(kernel_release)?;
+        if !version.supports_bpf_ring_buffer() {
+            return Ok(false);
+        }
         let _object = load_object(pid)?;
-        Ok(())
+        Ok(true)
     }
 
-    pub fn attach(pid: i32) -> Result<Self> {
+    pub fn attach(pid: i32, kernel_release: &str) -> Result<Self> {
+        let version = KernelVersion::from_str(kernel_release)?;
+        if !version.supports_bpf_ring_buffer() {
+            return Ok(Self::fallback(format!(
+                "kernel {kernel_release} has no upstream BPF ring buffer support"
+            )));
+        }
+
+        match Self::attach_bpf(pid) {
+            Ok(notifier) => Ok(notifier),
+            Err(error) => Ok(Self::fallback(format!(
+                "lifecycle eBPF attachment failed: {error:#}"
+            ))),
+        }
+    }
+
+    fn attach_bpf(pid: i32) -> Result<Self> {
         let object = load_object(pid)?;
 
         let fork = object
@@ -67,15 +93,34 @@ impl LifecycleNotifier {
         })?;
         let ring = ring_builder.build()?;
         Ok(Self {
-            ring,
+            ring: Some(ring),
             _links: vec![fork, exit, exec],
-            _object: object,
+            _object: Some(object),
             pending,
+            fallback_reason: None,
         })
     }
 
+    fn fallback(reason: String) -> Self {
+        Self {
+            ring: None,
+            _links: Vec::new(),
+            _object: None,
+            pending: Arc::new(AtomicU8::new(0)),
+            fallback_reason: Some(format!(
+                "{reason}; using one-second procfs lifecycle reconciliation"
+            )),
+        }
+    }
+
+    pub fn fallback_reason(&self) -> Option<&str> {
+        self.fallback_reason.as_deref()
+    }
+
     pub fn consume(&self) -> Result<LifecycleEvents> {
-        self.ring.consume()?;
+        if let Some(ring) = &self.ring {
+            ring.consume()?;
+        }
         let flags = self.pending.swap(0, Ordering::Relaxed);
         Ok(LifecycleEvents {
             thread_change: flags & 1 != 0,
@@ -103,4 +148,22 @@ fn load_object(pid: i32) -> Result<Object> {
         .copy_from_slice(&(pid as u32).to_ne_bytes());
     rodata.set_initial_value(&initial)?;
     open.load().context("failed to load lifecycle BPF object")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LifecycleNotifier;
+
+    #[test]
+    fn linux_5_4_uses_procfs_reconciliation_without_loading_bpf() {
+        let notifier = LifecycleNotifier::attach(1, "5.4.0-generic").unwrap();
+        assert!(
+            notifier
+                .fallback_reason()
+                .is_some_and(|reason| reason.contains("procfs lifecycle reconciliation"))
+        );
+        let events = notifier.consume().unwrap();
+        assert!(!events.thread_change);
+        assert!(!events.exec);
+    }
 }
